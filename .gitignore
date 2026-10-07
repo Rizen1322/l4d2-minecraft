@@ -7,3 +7,10 @@ __pycache__/
 research/portal1-reference/
 research/portal2-release/
 research/*.zip
+toolchains/
+passthrough/guest/.gradle/
+passthrough/guest/build/
+passthrough/guest/run/
+passthrough/guest-game/
+passthrough/events.jsonl
+passthrough/native/build/

@@ -56,3 +56,46 @@
 - Пользователь указал Minecraft gameDir Legacy Launcher. Последний подтверждённый профиль OptiFine1.20.1/Java17, тогда как Portalcraft использует26.3/Fabric/Java25. Аккаунтные данные не читались, игровой профиль не менялся.
 - Составлено PASSTHROUGH_RESEARCH.md с источниками, интерфейсами L4D2 и первым проверяемым результатом реальной интеграции.
 - Восстановлены исходные Workshop-флаги, собственный черновой VPK отключён, временные loose tests и test CFG убраны. Native hooks/ReShade и новые Minecraft-профили не устанавливались.
+
+
+## 2026-10-07: настоящий guest passthrough
+
+Создан passthrough/guest из MIT-примера universal-modder, отдельный Fabric
+профиль L4D2MC-Fabric-26.3, оригинальный VScript-мост камеры/коллизий,
+Python/WebSocket relay и x86 ReShade compositor. User разрешил оба loader и
+временную проверку MSAA. Профиль запускается самим пользователем через Legacy
+Launcher, авторизация остаётся у launcher; аккаунты/токены не читались.
+
+Компиляция: Microsoft OpenJDK25.0.1 из существующего launcher; Zig0.15.2
+официальный архив с подтверждённым SHA256; ReShade SDK tagv6.8.0. Загруженный
+с официального www.reshade.me setup имеет ожидаемый signer thumbprint, но
+Get-AuthenticodeSignature сообщил UnknownError (полная trust-проверка не
+подтверждена). Нативные retail файлы не изменялись, добавлены собственные
+loader/adapter/scripts/models с receipt.
+
+Первый Zig -shared -static создал ar вместо PE: обнаружено PE-проверкой,
+исправлено -shared без -static. Реальный MSVC/MinGW x86 ABI конфликт в
+find_uniform_variable вызвал дампы; исправлено явным result pointer и
+thiscall для API20 slot20. Последующие реальные запуски стабильны.
+
+Игровые доказательства: evidence/passthrough-first-link.png (реальный HUD),
+no-msaa.png (гостевой блок в карте), inventory-confirmed.png (мышь/хотбар).
+Source TraceLine попал в коллизию реального MC блока face639.969 при
+ожидаемом640. Полный тест глубины за стенами ещё не завершён. Отдельная
+проба occlusion попала в prop_dynamic и не является доказательством wall
+occlusion. В игре были временные тестовые постройки в отдельном guest world.
+
+Проверки: guest Gradle build, native x86 PE/export validation, 10 Python
+тестов. Code review выявил ownership, устаревшие коллизии/клавиши и recovery
+backup; внесены соответствующие исправления. Не объявлять законченной total
+conversion: пока только локальный c1m1_hotel, 128 кубических коллизий,
+примерная VScript-камера, нет полного BSP/Steve-body/navmesh.
+
+
+Дополнительная проверка коллизий: настоящий Source-сценарий с контролируемым
+снимком создал 1 collider; после прекращения обновлений через 1.2s осталось0.
+Это отдельный fixture-тест lease, не полная проверка отключения обоих игр.
+Последнее обновление установлено после штатного закрытия игр; сохранён guest
+world. Workshop-флаги совпали с launch backup побайтно. В последнем JAR
+добавлены controller attach/release и syncdone ack; эти аварийные ветки
+прошли сборку/ревью, отдельный игровой запуск после них ещё не выполнялся.
