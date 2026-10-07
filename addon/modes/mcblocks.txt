@@ -1,0 +1,12 @@
+"mcblocks"
+{
+    "base" "coop"
+    "displaytitle" "Block Sandbox"
+    "ShortDescription" "Build and break blocks in L4D2."
+    "Author" "Rizen and Codex"
+    "Image" "maps/any"
+    "description" "Build and break blocks with L4D2 weapons and infected. Type !mc help."
+    "maxplayers" "4"
+    "hasdifficulty" "1"
+    "singlechapter" "1"
+}

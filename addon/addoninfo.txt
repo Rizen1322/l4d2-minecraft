@@ -1,0 +1,9 @@
+"AddonInfo"
+{
+    "addonSteamAppID" "550"
+    "addontitle" "L4D2 Block Sandbox"
+    "addonversion" "0.1.0"
+    "addonauthor" "Rizen and Codex"
+    "addonContent_Mutation" "1"
+    "addonDescription" "Build and break blocks inside L4D2. Local VScript mutation."
+}

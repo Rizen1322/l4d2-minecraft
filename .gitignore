@@ -1,0 +1,9 @@
+backups/
+evidence/
+build-game/
+dist/
+__pycache__/
+*.log
+research/portal1-reference/
+research/portal2-release/
+research/*.zip
