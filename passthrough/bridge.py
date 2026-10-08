@@ -475,6 +475,9 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                 last_render = None
                 last_wheel = None
                 last_gameplay = 0.0
+                guest_map = None
+                map_ready = False
+                last_world_request = 0.0
                 last_reply_frame = None
                 while True:
                     host_fresh = False
@@ -482,6 +485,13 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                         sample=source.read()
                         if sample is not None:
                             host_fresh = True
+                            if guest_map != sample['map']:
+                                guest_map=sample['map'];map_ready=False
+                                collision.cells.clear()
+                                last_world_request=0.0
+                            if time.monotonic()-last_world_request>1.0:
+                                await socket.send(json.dumps({'t':'world','map':guest_map}))
+                                last_world_request=time.monotonic()
                             pose = camera(sample, args.width / args.height)
                             actual=render.read()
                             pose = render_camera(pose, actual, last_render)
@@ -496,7 +506,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                     sync_after = time.monotonic() + 0.3
                                 last_frame = identity
                                 if time.monotonic() - last_collision > 0.25:
-                                    collision.publish(sample['map'], pose['p'], active=frames.fresh(3.0))
+                                    collision.publish(sample['map'], pose['p'], active=map_ready and frames.fresh(3.0))
                                     last_collision = time.monotonic()
                                 if sync_after is not None and frames.fresh() and time.monotonic() >= max(sync_after,next_sync):
                                     await socket.send(json.dumps({'t':'blocksync','r':16,'id':sync_id}))
@@ -519,7 +529,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                     last_wheel=wheel
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
-                    inputs.enabled = host_fresh and bool(sample.get("visible",True)) and frames.fresh(3.0)
+                    inputs.enabled = map_ready and host_fresh and bool(sample.get("visible",True)) and frames.fresh(3.0)
                     host_input.controls(inputs.enabled)
                     gui_enabled = inputs.gui_open and inputs.enabled
                     host_input.set_gui(gui_enabled)
@@ -542,6 +552,8 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                             gameplay.apply(event)
                             if event.get('t') == 'syncdone' and event.get('id') == sync_id:
                                 synced = True
+                            if event.get('t') == 'mapready' and event.get('map')==guest_map:
+                                map_ready=bool(event.get('ready'))
                             if event.get('t') == 'ui':
                                 inputs.gui_open = bool(event.get('open'))
                         except (ValueError, TypeError):

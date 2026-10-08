@@ -16,7 +16,7 @@ class GameplayMailbox:
     def __init__(self,path):
         self.path=path;self.generation=uuid.uuid4().hex[:12]
         self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
-        self.map=None;self.changed=0
+        self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0
 
     def apply(self,message):
         kind=message.get('t')
@@ -31,6 +31,24 @@ class GameplayMailbox:
             event=('melee',d*15,r*32)
         elif kind=='pteleport':event=('teleport',*source_position(message['pos']))
         elif kind=='chorus':event=('chorus',)
+        elif kind in ('link','signals'):
+            rows=[[*message['pos'],False]] if kind=='link' else message['s']
+            if len(rows)>32:raise ValueError('too many redstone links')
+            checked=[]
+            for row in rows:
+                if len(row)!=4 or any(type(v) is not int or abs(v)>1023 for v in row[:3]) or type(row[3]) is not bool:raise ValueError('invalid redstone position/signal')
+                checked.append((*row[:3],int(row[3])))
+            if kind=='link':event=('link',*checked[0][:3])
+            else:self.signals=checked;self.signals_at=time.monotonic()
+        elif kind=='equipment':
+            a=message.get('armor');t=message.get('toughness');b=message.get('blocking')
+            if type(a) not in (int,float) or type(t) not in (int,float) or type(b) is not bool or not math.isfinite(a+t) or not 0<=a<=20 or not 0<=t<=20:
+                raise ValueError('invalid equipment')
+            self.equipment=(float(a),float(t),int(b));self.equipment_at=time.monotonic()
+        elif kind=='meal':
+            h=message.get('h');g=message.get('golden',False)
+            if type(h) not in (int,float) or not math.isfinite(h) or not 0<h<=100 or type(g) is not bool:raise ValueError('invalid meal')
+            event=('meal',float(h),int(g))
         elif kind=='heal':
             h=message['h']
             if isinstance(h,bool) or not isinstance(h,(int,float)) or not math.isfinite(h) or not 0<h<=100:raise ValueError('invalid food heal')
@@ -49,10 +67,17 @@ class GameplayMailbox:
             source=message['m' if kind=='mobs' else 'p'];rows=[]
             if len(source)>256:raise ValueError('too many entities')
             for row in source[:64]:
-                if len(row)!=5 or type(row[0]) is not int or not 0<row[0]<2**31:raise ValueError('invalid entity')
+                if len(row) not in ((5,6) if kind=='proj' else (5,)) or type(row[0]) is not int or not 0<row[0]<2**31:raise ValueError('invalid entity')
                 name=row[1]
                 if not isinstance(name,str) or len(name)>48 or not all(c.isascii() and (c.isalnum() or c=='_') for c in name):raise ValueError('invalid kind')
-                rows.append((row[0],name,*source_position(row[2:])))
+                position=source_position(row[2:5])
+                if kind=='proj':
+                    damage=60.0 if name=='arrow' else 80.0
+                    if len(row)==6:
+                        if type(row[5]) not in (int,float) or not math.isfinite(row[5]) or not 0<=row[5]<=100:raise ValueError('invalid projectile damage')
+                        damage=float(row[5])*15
+                    rows.append((row[0],name,*position,damage))
+                else:rows.append((row[0],name,*position))
             if kind=='mobs':self.mobs=rows
             else:self.projectiles=rows
         elif kind=='phys':
@@ -70,10 +95,14 @@ class GameplayMailbox:
     def publish(self,map_name,*,active=True,gui=False,sprint=False,attack=False,use=False):
         if not map_name or not all(c.isascii() and (c.isalnum() or c=='_') for c in map_name):raise ValueError('invalid map')
         if self.map is not None and self.map!=map_name:
-            self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear()
+            self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[]
         self.map=map_name
         records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)}']
         if active:
+            if time.monotonic()-self.signals_at<0.75:
+                records+=[' '.join(map(str,('signal',*e))) for e in self.signals]
+            if self.equipment is not None and time.monotonic()-self.equipment_at<0.75:
+                records.append(' '.join(map(str,('equipment',*self.equipment))))
             records+=[' '.join(map(str,('event',*e))) for e in self.events]
             records+=[' '.join(map(str,('projectile',*e))) for e in self.projectiles]
             records+=[' '.join(map(str,('physics',*e))) for e in self.physics]

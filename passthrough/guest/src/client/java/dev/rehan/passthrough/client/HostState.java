@@ -83,7 +83,7 @@ public final class HostState {
 	/** The latest pose if the host is still sending, else null. */
 	static Pose live() {
 		Pose p = latest;
-		return visible && p != null && System.nanoTime() - p.receivedNanos() < TIMEOUT_NANOS ? p : null;
+		return dev.rehan.passthrough.MapBuilds.ready && visible && p != null && System.nanoTime() - p.receivedNanos() < TIMEOUT_NANOS ? p : null;
 	}
 
 	/** The pose for the frame being rendered, or null when no host is attached. */

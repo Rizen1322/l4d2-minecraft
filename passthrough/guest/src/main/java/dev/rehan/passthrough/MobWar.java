@@ -87,7 +87,7 @@ public final class MobWar {
         if(faction==null)return false;
         String kind=BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath();
         boolean protector=kind.equals("iron_golem") || kind.equals("snow_golem");
-        return faction==(protector?1:0);
+        return faction==(protector?1:0) && GolemOrders.permits(mob,target);
     }
 
 	public static void peds(final double[] flat) {
@@ -115,6 +115,7 @@ public final class MobWar {
 		if (targets.getAvailableGoals().stream().noneMatch(w -> w.getGoal() instanceof ProxyTargetGoal)) {
 			targets.addGoal(2, new ProxyTargetGoal(mob));
             ((MobAccessor)mob).passthrough$goalSelector().addGoal(0,new SourcePursuitGoal(mob));
+            if(GolemOrders.golem(mob))((MobAccessor)mob).passthrough$goalSelector().addGoal(1,new GolemOrders(mob));
 		}
 
 		AttributeInstance range = mob.getAttribute(Attributes.FOLLOW_RANGE);

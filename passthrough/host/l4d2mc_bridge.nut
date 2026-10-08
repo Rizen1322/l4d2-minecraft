@@ -28,6 +28,7 @@ foreach(prop in staleMobProps)if(prop.IsValid())prop.Kill();
 PrecacheModel("models/l4d2mc/cube.mdl");
 ::L4D2MCBridge <- { frame = 0, anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
 IncludeScript("l4d2mc_gameplay");
+IncludeScript("l4d2mc_survival");
 L4D2MCBridge.ClearCollision <- function() {
     foreach (key, block in blocks) if (block.IsValid()) block.Kill();
     blocks.clear();

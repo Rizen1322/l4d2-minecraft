@@ -59,3 +59,56 @@ class CombatTests(unittest.TestCase):
             self.assertIn('teleport 64 5600 2880',text)
             self.assertIn('chorus',text)
             with self.assertRaises(ValueError):box.apply({'t':'pteleport','pos':[float('nan'),0,0]})
+
+    def test_equipment_lease_is_bounded_and_cleared_on_map_change(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'equipment','armor':20,'toughness':8,'blocking':True})
+            box.publish('c1m1_hotel')
+            self.assertIn('equipment 20.0 8.0 1',box.path.read_text())
+            box.publish('c1m2_streets')
+            self.assertNotIn('equipment',box.path.read_text())
+            for msg in [{'armor':21,'toughness':8,'blocking':True},
+                        {'armor':20,'toughness':float('nan'),'blocking':True},
+                        {'armor':20,'toughness':8,'blocking':'yes'}]:
+                with self.assertRaises(ValueError):box.apply({'t':'equipment',**msg})
+
+    def test_food_regeneration_and_bonus_are_data_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'meal','h':32,'golden':True})
+            box.publish('c1m1_hotel')
+            self.assertIn('meal 32.0 1',box.path.read_text())
+            for h in [-1,101,float('inf'),True]:
+                with self.assertRaises(ValueError):box.apply({'t':'meal','h':h,'golden':False})
+
+    def test_redstone_link_positions_and_signal_rows_are_validated(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'link','pos':[2,90,-175]})
+            box.apply({'t':'signals','s':[[2,90,-175,True]]})
+            box.publish('c1m1_hotel')
+            self.assertIn('link 2 90 -175',box.path.read_text())
+            self.assertIn('signal 2 90 -175 1',box.path.read_text())
+            for row in [[0,0,0,'true'],[0.5,0,0,True],[0,0,0,float('nan')]]:
+                with self.assertRaises(ValueError):box.apply({'t':'signals','s':[row]})
+
+    def test_expired_equipment_and_redstone_do_not_retain_protection(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            with patch('combat.time.monotonic',return_value=10):
+                box.apply({'t':'equipment','armor':20,'toughness':8,'blocking':True})
+                box.apply({'t':'signals','s':[[0,0,0,True]]})
+            with patch('combat.time.monotonic',return_value=11):box.publish('c1m1_hotel')
+            self.assertNotIn('equipment',box.path.read_text())
+            self.assertNotIn('signal',box.path.read_text())
+
+    def test_arrows_carry_minecraft_damage_and_legacy_rows_still_work(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'proj','p':[[1,'arrow',2,90,-175,9],[2,'arrow',2,90,-175]]})
+            box.publish('c1m1_hotel')
+            self.assertIn('projectile 1 arrow 64 5600 2880 135.0',box.path.read_text())
+            self.assertIn('projectile 2 arrow 64 5600 2880 60.0',box.path.read_text())
+            with self.assertRaises(ValueError):box.apply({'t':'proj','p':[[1,'arrow',0,0,0,float('nan')]]})

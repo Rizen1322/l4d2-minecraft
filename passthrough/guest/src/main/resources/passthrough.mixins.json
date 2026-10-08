@@ -3,6 +3,7 @@
   "package": "dev.rehan.passthrough.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
+    "ArrowDamageAccessor",
     "FoodHealMixin",
     "ChorusTeleportMixin",
     "HostCollisionMixin",

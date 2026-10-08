@@ -33,6 +33,7 @@ import org.java_websocket.server.WebSocketServer;
 public final class HostLink extends WebSocketServer {
 	private static HostLink instance;
 	private volatile WebSocket controller;
+    private final java.util.LinkedHashSet<Integer> delivered=new java.util.LinkedHashSet<>();
 
 	private HostLink(final int port) {
 		super(new InetSocketAddress("127.0.0.1", port));
@@ -76,6 +77,10 @@ public final class HostLink extends WebSocketServer {
 	public void onMessage(final WebSocket conn, final String message) {
 		try {
 			JsonObject m = JsonParser.parseString(message).getAsJsonObject();
+            if(m.has("rid"))synchronized(delivered) {
+                int rid=m.get("rid").getAsInt();if(!delivered.add(rid))return;
+                if(delivered.size()>256)delivered.remove(delivered.iterator().next());
+            }
 			switch (m.get("t").getAsString()) {
 				case "attach" -> {
 					WebSocket previous = this.controller;
@@ -84,7 +89,8 @@ public final class HostLink extends WebSocketServer {
 					Minecraft minecraft = Minecraft.getInstance();
 					minecraft.execute(() -> ClientInput.releaseRelay(minecraft));
 				}
-				case "cam" -> HostState.update(m);
+				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString());
+                case "cam" -> HostState.update(m);
 				case "surface" -> HostState.surface(m);
                 case "physground" -> HostTerrain.update(m.getAsJsonArray("p"));
                 case "ground" -> {} // Retired: Source supports are virtual, never world blocks.
@@ -109,7 +115,12 @@ public final class HostLink extends WebSocketServer {
 
 					MobWar.peds(flat);
 				}
-				case "mobdmg" -> MobWar.damage(m.get("id").getAsInt(), m.get("d").getAsDouble());
+				case "equipmenthit" -> dev.rehan.passthrough.SurvivalFeatures.equipmentHit(m.get("d").getAsInt(),m.get("shield").getAsBoolean());
+                case "supply" -> {
+                    JsonArray p=m.getAsJsonArray("pos");dev.rehan.passthrough.SurvivalFeatures.supply(p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble(),m.get("kind").getAsInt());
+                }
+                case "breakblock" -> WorldBridge.breakBlock(m.getAsJsonArray("pos"),m.get("d").getAsDouble());
+                case "mobdmg" -> MobWar.damage(m.get("id").getAsInt(), m.get("d").getAsDouble());
 				case "spawnmobs" -> MobWar.spawn(m.get("k").getAsString(), m.has("n") ? m.get("n").getAsInt() : 5,
 					m.has("rmin") ? m.get("rmin").getAsDouble() : 8.0, m.has("rmax") ? m.get("rmax").getAsDouble() : 16.0,
 					m.has("arc") ? m.get("arc").getAsDouble() : 40.0, m.has("yaw") ? m.get("yaw").getAsDouble() : 0.0,

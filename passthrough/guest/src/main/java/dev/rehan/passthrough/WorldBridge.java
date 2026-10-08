@@ -42,6 +42,7 @@ public final class WorldBridge {
 
 	static void detach() {
 		saveMigration();
+        resetBarricades();
 		server = null;
 		barriers.clear();
 	}
@@ -168,7 +169,10 @@ public final class WorldBridge {
 
 	/** Every server tick: block changes, and projectiles in flight for the host to trace through its own world. */
 	static void tick(final MinecraftServer s) {
-		flush(s);
+		MapBuilds.tick(s);
+        SurvivalFeatures.tick(s);
+        RedstoneLinks.tick(s);
+        flush(s);
         if (++migrationTicks%100==0) saveMigration();
 		if (Passthrough.active) {
 			reportProjectiles(s.overworld());
@@ -201,7 +205,11 @@ public final class WorldBridge {
 
 			if (kind != null) {
 				b = b == null ? new StringBuilder("{\"t\":\"proj\",\"p\":[") : b.append(',');
-				b.append(String.format(Locale.ROOT, "[%d,\"%s\",%.3f,%.3f,%.3f]", e.getId(), kind, e.getX(), e.getY(), e.getZ()));
+				if(e instanceof AbstractArrow arrow) {
+                    double damage=Math.ceil(arrow.getDeltaMovement().length()*((dev.rehan.passthrough.mixin.ArrowDamageAccessor)arrow).l4d2mc$baseDamage());
+                    if(arrow.isCritArrow())damage*=1.25;
+                    b.append(String.format(Locale.ROOT,"[%d,\"%s\",%.3f,%.3f,%.3f,%.3f]",e.getId(),kind,e.getX(),e.getY(),e.getZ(),Math.clamp(damage,0,100)));
+                }else b.append(String.format(Locale.ROOT,"[%d,\"%s\",%.3f,%.3f,%.3f]",e.getId(),kind,e.getX(),e.getY(),e.getZ()));
 			}
 		}
 
@@ -250,8 +258,10 @@ public final class WorldBridge {
 		}
 
 		Nether.onBlockChanged(pos, state);
+        if(!placingGround)MapBuilds.changed(level,pos,state);
 		if (!placingGround) {
 			changes.put(pos.immutable(), solidForHost(level, pos, state));
+            barricadeDamage.remove(pos);
 		}
 	}
 
@@ -321,6 +331,23 @@ public final class WorldBridge {
 			Passthrough.events.accept("{\"t\":\"syncdone\",\"id\":" + request + ",\"count\":" + found + "}");
 		});
 	}
+
+    public static void resetBarricades(){barricadeDamage.clear();}
+    private static final Map<BlockPos,Double> barricadeDamage=new java.util.HashMap<>();
+    public static void breakBlock(com.google.gson.JsonArray values,double damage){
+        if(values.size()!=3 || !Double.isFinite(damage) || damage<=0 || damage>80)return;
+        int x=values.get(0).getAsInt(),y=values.get(1).getAsInt(),z=values.get(2).getAsInt();
+        MinecraftServer s=server;if(s==null || Math.abs(x)>1023 || Math.abs(z)>1023)return;
+        s.execute(()->{BlockPos p=new BlockPos(x,y,z);ServerLevel level=s.overworld();
+            if(!Passthrough.active || !MapBuilds.ready || !level.isLoaded(p))return;
+            BlockState state=level.getBlockState(p);float hardness=state.getDestroySpeed(level,p);
+            if(state.isAir() || state.is(Blocks.BARRIER) || hardness<0){barricadeDamage.remove(p);return;}
+            if(barricadeDamage.size()>2048)barricadeDamage.clear();
+            double hit=barricadeDamage.getOrDefault(p,0.0)+damage;
+            if(hit>=Math.max(8,hardness*20)){barricadeDamage.remove(p);level.destroyBlock(p,true);}
+            else barricadeDamage.put(p,hit);
+        });
+    }
 
 	/** Elytra on and gliding (creative flight off), launched forward along the look; or back to creative flight. */
 	public static void glide(final boolean start, final double speed) {

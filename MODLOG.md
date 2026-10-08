@@ -238,3 +238,41 @@ Final regression checkpoint: Java/native build succeeded (x86 AddonInit verified
 no further concrete errors in escape bounds, coordinate signs or owned-prop
 cleanup. Five own installed files match their source/build SHA256. No games
 launched or operated; live behavior is explicitly unverified.
+
+
+2026-10-08 requested "improve everything", continued code-only/no game launches.
+Prepared per-map NBT block+blockentity archives, bounded restore, 60-second/save/
+transition/shutdown checkpoints. Retained early CHUNK_LOAD, captured container
+NBT directly from CHUNK_UNLOAD, retry world handshake/latest requested map.
+Reviewer found partial transition and archive-vs-vanilla-flush loss paths;
+added durable transition/checkpoint markers, recovery and saveEverything(true,
+true,true) before deleting markers. Own world backup made before installation.
+Added opt-in /l4d2mc survival|creative, preserved Source movement/health authority;
+food regenerates, golden apples give bounded temporary HP. Equipment lease feeds
+armor/toughness/front shield reduction with wear; pre-damage chaining only when
+scripted mode supports it, ordinary coop nonfatal compensation cannot prevent
+incap/lethal blows. Generic game-event registration guarded for retail API.
+Added golem follow/guard/attack commands + crouch RMB empty-hand follow.
+Added proximity/LOS barricade pressure with hardness and Tank scaling, reset
+per-map damage; rare infected supplies. Explicit redstone link + bounded signal
+snapshot controls doors/buttons, transient links per session. Arrow payload
+uses verified mapped AbstractArrow.baseDamage accessor+speed, Source scale15;
+legacy projectile rows remain valid, critical multiplier approximate1.25.
+No complete Source navmesh, all-enchantment effects, bed checkpoints or per-map
+mob archive implemented. Official-script control reference read from
+https://raw.githubusercontent.com/sw1ft747/l4d2-vscript-projects/master/prop_hunt/scripts/vscripts/scriptedmode.nut
+(AllowTakeDamage contract, original source files not included in mod).
+Java build and40 Python tests pass; native/shader unchanged from prior verified
+build. All new runtime behavior remains unverified due no-launch instruction.
+
+Final recovery review added durable footprint (previous archive + current cells
++ all touched AIR positions), retained in touched through repeated interrupted
+recovery and cleared only after successful world flush. Projectile combat-only
+branch braces fixed; no unconditional brush/pearl damage. World handshake is a
+periodic heartbeat even when ready, so leaving/reentering the guest world can
+recover without WebSocket reconnect. No runtime tests performed.
+
+Offline world backup (all files SHA256 verified): E:\вин\ПРОЕКТЫ\main\l4d2-minecraft\backups\guest-before-survival-20261008-655b3a77
+Four own files installed and verified. No games launched; loaders and graphics settings unchanged.
+
+Final read-only review confirmed retained recovery tombstones through repeated interruptions; no further concrete errors in the targeted check. Runtime verification remains pending.

@@ -67,6 +67,7 @@ def host(manifest):
         (ROOT / "dist/L4D2Minecraft.addon32", GAME / "bin/l4d2mc/L4D2Minecraft.addon32"),
         (ROOT / "passthrough/host/l4d2mc_bridge.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_bridge.nut"),
         (ROOT / "passthrough/host/l4d2mc_gameplay.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_gameplay.nut"),
+        (ROOT / "passthrough/host/l4d2mc_survival.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_survival.nut"),
     ]
     files.extend((p, shader_dir / p.name) for p in (ROOT / "passthrough/shaders").glob('*') if p.is_file())
     files.extend((p, GAME / 'left4dead2/models/l4d2mc' / p.name) for p in (ROOT / 'addon/models/l4d2mc').glob('*') if p.is_file())

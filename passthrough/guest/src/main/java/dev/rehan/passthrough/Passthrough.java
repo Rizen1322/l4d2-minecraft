@@ -18,17 +18,21 @@ public class Passthrough implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+        SurvivalFeatures.register();
 		ServerLifecycleEvents.SERVER_STARTED.register(WorldBridge::attach);
+        ServerLifecycleEvents.SERVER_STARTED.register(MapBuilds::attach);
         ServerLifecycleEvents.SERVER_STARTED.register(HostTerrain::attach);
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
 			// Remove our transient proxies before saving; retain user mobs and builds.
-			Nether.detach(server);
+			MapBuilds.detach();
+            Nether.detach(server);
 			MobWar.detach(server);
 			WorldBridge.detach();
             HostTerrain.detach();
 		});
-		net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register((level,chunk,newChunk) -> WorldBridge.cleanLegacySupports(level,chunk));
-		ServerEntityEvents.ENTITY_LOAD.register(MobWar::onEntityLoad);
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register((level,chunk,newChunk) -> {WorldBridge.cleanLegacySupports(level,chunk);MapBuilds.chunk(level,chunk);});
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_UNLOAD.register(MapBuilds::unload);
+        ServerEntityEvents.ENTITY_LOAD.register(MobWar::onEntityLoad);
 		ServerTickEvents.END_SERVER_TICK.register(WorldBridge::tick);
 		LOG.info("passthrough loaded");
 	}

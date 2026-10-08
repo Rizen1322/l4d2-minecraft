@@ -171,6 +171,16 @@ L4D2MCBridge.Event <- function(fields,player) {
             try {EntFire(name,"Explode","",0,player);}catch(error){blast.Kill();throw error;}
         }
         printl("[L4D2MC COMBAT] explosion "+p+" radius="+radius);
+    } else if(kind=="link" && fields.len()==6) {
+        Link(fields,player);
+    } else if(kind=="meal" && fields.len()==5) {
+        local amount=Number(fields[3],100),gold=Integer(fields[4]);if(amount<=0 || gold>1)throw "invalid meal";
+        survival.meal+=amount;if(survival.meal>100)survival.meal=100;
+        if(gold==1 && !player.IsIncapacitated() && NetProps.HasProp(player,"m_healthBuffer")) {
+            local buffer=NetProps.GetPropFloat(player,"m_healthBuffer")+20,room=100-player.GetHealth();
+            NetProps.SetPropFloat(player,"m_healthBuffer",buffer<room?buffer:room);
+            if(NetProps.HasProp(player,"m_healthBufferTime"))NetProps.SetPropFloat(player,"m_healthBufferTime",Time());
+        }
     } else if(kind=="heal" && fields.len()==4) {
         local amount=Number(fields[3],100);
         if(amount<=0)throw "invalid food heal";
@@ -221,7 +231,7 @@ L4D2MCBridge.Event <- function(fields,player) {
     } else throw "invalid event";
 };
 L4D2MCBridge.Projectile <- function(fields,player) {
-    if(fields.len()!=6)throw "invalid projectile";
+    if(fields.len()!=6 && fields.len()!=7)throw "invalid projectile";
     local id=Integer(fields[1]);
     local p=Vector(Number(fields[3]),Number(fields[4]),Number(fields[5]));
     if(id in gameplay.projectiles) {
@@ -236,8 +246,11 @@ L4D2MCBridge.Projectile <- function(fields,player) {
                         local back=before.pos-p;
                         if(back.Length()>0.01)back=back*(24.0/back.Length());
                         if(TeleportPlayer(player,trace.pos+back))player.TakeDamage(5,0,null);
-                    } else if("enthit" in trace && IsCombatTarget(trace.enthit))
-                        trace.enthit.TakeDamage(fields[2]=="firework"?80:60,2,player);
+                    } else if("enthit" in trace && IsCombatTarget(trace.enthit)) {
+                        local damage=fields.len()==7?Number(fields[6],1500):(fields[2]=="firework"?80:60);
+                        if(damage<0)throw "invalid projectile damage";
+                        trace.enthit.TakeDamage(damage,2,player);
+                    }
                     local at=trace.pos;
                     gameplay.replies[id]<-format("{\"t\":\"projhit\",\"rid\":%d,\"id\":%d,\"pos\":[%.4f,%.4f,%.4f],\"stick\":true}",id,id,at.x/32,at.z/32,-at.y/32);
                     before.hit=true;
@@ -371,12 +384,15 @@ L4D2MCBridge.ReadGameplay <- function(player) {
         local f=split(lines[i]," ");
         if(f.len()>0 && f[0]=="event")try{Event(f,player);}catch(error){printl("[L4D2MC EVENT] "+error);}
         else if(f.len()>0 && f[0]=="projectile")try{Projectile(f,player);}catch(error){printl("[L4D2MC PROJECTILE] "+error);}
+        else if(f.len()>0 && f[0]=="signal")try{Signal(f,player);}catch(error){printl("[L4D2MC SIGNAL] "+error);}
+        else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
         else if(f.len()>0 && f[0]=="physics")try{Physics(f,player);}catch(error){printl("[L4D2MC PHYSICS] "+error);}
     }
     HeldActions(player,header.len()==8 && header[6]=="1",header.len()==8 && header[7]=="1",header[4]=="1");
     Hide(player);
     Movement(player,header[4]=="1",header[5]=="1");
     GroundPhysics();
+    SurvivalTick(player);
     if(NetProps.HasProp(player,"m_hActiveWeapon"))Hide(NetProps.GetPropEntity(player,"m_hActiveWeapon"));
     if(NetProps.HasProp(player,"m_hViewModel")) {
         for(local i=0;i<NetProps.GetPropArraySize(player,"m_hViewModel");i++)Hide(NetProps.GetPropEntityArray(player,"m_hViewModel",i));
