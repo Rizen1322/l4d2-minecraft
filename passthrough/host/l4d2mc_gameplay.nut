@@ -105,7 +105,14 @@ L4D2MCBridge.HeldActions <- function(player,attack,use,gui) {
     local wanted=0;
     local weapon=NetProps.GetPropEntity(player,"m_hActiveWeapon"),kind=weapon!=null?weapon.GetClassname():"";
     local carry=kind=="weapon_gascan" || kind=="weapon_cola_bottles" || kind=="weapon_gnome" || kind=="weapon_fireworkcrate" || kind.find("weapon_upgradepack_")==0;
-    if(!gui && use && (Usable(player) || carry))wanted=wanted|32; // IN_USE, normal Source use/hold processing.
+    local directUse=false;
+    if(use) {
+        local p=player.EyePosition(),t=Raycast(p,p+player.EyeAngles().Forward()*96,player);
+        if("enthit" in t && t.enthit!=null) {
+            local cls=t.enthit.GetClassname();directUse=cls.find("door")!=null || cls=="func_button";
+        }
+    }
+    if(!gui && use && !directUse && (Usable(player) || carry))wanted=wanted|32; // IN_USE, normal Source use/hold processing.
     if(!gui && attack && carry)wanted=wanted|1; // IN_ATTACK only for map carry/use items, never hidden guns.
     NetProps.SetPropInt(player,"m_afButtonForced",(flags&(~33))|gameplay.forced[id].old|wanted);
 };
@@ -248,18 +255,10 @@ L4D2MCBridge.Physics <- function(fields,player) {
     if((p-player.GetOrigin()).Length()>2048)return; // Out of range is ordinary during movement/teleports.
     if(!(id in gameplay.physics))gameplay.physics[id]<-{proxy=null,pos=p,width=width,height=height,at=Time()};
     local v=gameplay.physics[id];v.pos=p;v.width=width;v.height=height;v.at=Time();
-    if(mob==1 && v.proxy==null) {
-        local count=0,e=null;while((e=Entities.Next(e))!=null)count++;
-        if(count<1400) {
-            v.proxy=SpawnEntityFromTable("prop_dynamic_override",{model="models/l4d2mc/cube.mdl",targetname="l4d2mc_entity_"+id,
-                origin=p,solid=2,renderamt=0,rendermode=10,DisableBoneFollowers=1,disableshadows=1});
-            if(v.proxy!=null) {
-                NetProps.SetPropVector(v.proxy,"m_Collision.m_vecMins",Vector(-width/2,-width/2,0));
-                NetProps.SetPropVector(v.proxy,"m_Collision.m_vecMaxs",Vector(width/2,width/2,height));
-            }
-        }
-    }
-    if(v.proxy!=null && v.proxy.IsValid())v.proxy.SetOrigin(p);
+    // Mobs have no Source collision prop: they remain visible/attackable in
+    // Minecraft while Source survivors can walk through them without trapping.
+    if(v.proxy!=null){if(v.proxy.IsValid())v.proxy.Kill();v.proxy=null;}
+
 };
 L4D2MCBridge.GroundPhysics <- function() {
     gameplay.ground.clear();local list=[],stale=[];
@@ -281,8 +280,8 @@ L4D2MCBridge.GroundPhysics <- function() {
         NetProps.SetPropInt(value.proxy,"m_Collision.m_usSolidFlags",flags|4);
     }
     local restore=function(){foreach(v in masked)if(v[0].IsValid())NetProps.SetPropInt(v[0],"m_Collision.m_usSolidFlags",v[1]);};
-    // Bound expensive Source traces to twelve entities per think.
-    try { for(local i=0;i<12 && i<list.len();i++) {
+    // Bound wider body probes to six entities per think.
+    try { for(local i=0;i<6 && i<list.len();i++) {
         local index=(gameplay.physIndex+i)%list.len(),id=list[index],v=gameplay.physics[id];
         local p=v.pos,ignore=v.proxy;
         local trace={start=p+Vector(0,0,8),end=p-Vector(0,0,512),ignore=ignore,mask=16395};
@@ -294,19 +293,56 @@ L4D2MCBridge.GroundPhysics <- function() {
         local floor=("hit" in trace && trace.hit && !("startsolid" in trace && trace.startsolid))?1:0;
         local y=floor?trace.pos.z/32:p.z/32;
         local xmin=-4096.0,xmax=4096.0,zmin=-4096.0,zmax=4096.0;
-        local mid=p+Vector(0,0,v.height/2),distance=v.width/2+16;
+        // Probe the body's width and three heights, far enough ahead for
+        // round-robin/network delay. A midpoint-only ray misses doors/corners.
+        local radius=v.width/2,side=radius>1?radius-1:0,distance=radius+96;
+        local low=v.height>64?24:v.height/4;
+        local embedded=false,escapeAxis=-1,escapeDistance=radius+1;
         foreach(axis,dir in [Vector(-1,0,0),Vector(1,0,0),Vector(0,1,0),Vector(0,-1,0)]) {
-            local t={start=mid,end=mid+dir*distance,ignore=ignore,mask=16395};TraceLine(t);
-            if("hit" in t && t.hit && !("startsolid" in t && t.startsolid)) {
-                if(axis==0)xmin=t.pos.x/32;else if(axis==1)xmax=t.pos.x/32;
-                else if(axis==2)zmin=-t.pos.y/32;else zmax=-t.pos.y/32;
+            foreach(h in [low,v.height/2,v.height-1])foreach(offset in [-side,0,side]) {
+                local across=axis<2?Vector(0,offset,0):Vector(offset,0,0);
+                local start=p+Vector(0,0,h)+across;
+                local t={start=start,end=start+dir*distance,ignore=ignore,mask=16395};TraceLine(t);
+                if("startsolid" in t && t.startsolid) {
+                    embedded=true;
+                    // Startsolid says nothing about direction. Probe back from
+                    // outside; the nearest exit within half a body width permits
+                    // depenetration, rather than caging all four directions.
+                    local reverse={start=start+dir*distance,end=start,ignore=ignore,mask=16395};TraceLine(reverse);
+                    if(!("startsolid" in reverse && reverse.startsolid) && "hit" in reverse && reverse.hit) {
+                        local gap=(reverse.pos-start).Length();
+                        if(gap<escapeDistance){escapeDistance=gap;escapeAxis=axis;}
+                    }
+                } else if("hit" in t && t.hit) {
+                    if(axis==0){local edge=t.pos.x/32;if(edge>xmin)xmin=edge;}
+                    else if(axis==1){local edge=t.pos.x/32;if(edge<xmax)xmax=edge;}
+                    else if(axis==2){local edge=-t.pos.y/32;if(edge>zmin)zmin=edge;}
+                    else {local edge=-t.pos.y/32;if(edge<zmax)zmax=edge;}
+                }
             }
+        }
+        if(embedded) {
+            // Deep/ambiguous intersections retain the previous support until its
+            // lease expires. Do not publish an unbounded path through the brush.
+            if(escapeAxis<0)continue;
+            // Preserve other samples' real wall hits. A shallow exit at one
+            // corner must not erase the neighbouring brush at another corner.
+            local clearance=escapeAxis==0?p.x-xmin*32-radius:
+                escapeAxis==1?xmax*32-p.x-radius:
+                escapeAxis==2?-zmin*32-p.y-radius:p.y+zmax*32-radius;
+            if(clearance<=escapeDistance+1)continue;
+            // Only the selected exit stays open, up to its real traced wall.
+            // The other three planes prevent increasing the penetration.
+            if(escapeAxis!=0)xmin=(p.x-radius)/32;
+            if(escapeAxis!=1)xmax=(p.x+radius)/32;
+            if(escapeAxis!=2)zmin=-(p.y+radius)/32;
+            if(escapeAxis!=3)zmax=-(p.y-radius)/32;
         }
         gameplay.ground.append(format("[%d,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f]",id,p.x/32,-p.y/32,floor,y,xmin,xmax,zmin,zmax));
     }
     } catch(error){restore();throw error;}
     restore();
-    gameplay.physIndex=(gameplay.physIndex+12)%list.len();
+    gameplay.physIndex=(gameplay.physIndex+6)%list.len();
 };
 L4D2MCBridge.GameplayLease <- function() { return gameplay.armed && Time()-gameplay.at<=0.5; };
 L4D2MCBridge.ReadGameplay <- function(player) {

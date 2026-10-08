@@ -42,7 +42,7 @@ public final class HostTerrain {
         if(!Passthrough.active)return true;
         if(!physical(e))return false;
         Support s=supports.get(e.getId());
-        return !Passthrough.active || s==null || s.entity!=e || System.nanoTime()-s.at>1_000_000_000L;
+        return !Passthrough.active || s==null || s.entity!=e || System.nanoTime()-s.at>1_000_000_000L || Math.hypot(e.getX()-s.x,e.getZ()-s.z)>1.5;
     }
 
     public static void update(JsonArray rows){

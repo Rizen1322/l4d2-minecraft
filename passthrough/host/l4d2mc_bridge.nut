@@ -11,6 +11,20 @@ if ("L4D2MCBridge" in getroottable()) {
         foreach (key, block in L4D2MCBridge.blocks)
             if (block.IsValid()) block.Kill();
 }
+// Old saved sessions may retain an invisible mob collider after its table
+// disappeared. Remove only this mod's numbered cube stand-ins, never map props.
+local staleMobProps=[],staleMobProp=null;
+foreach(staleClass in ["prop_dynamic","prop_dynamic_override"]) {
+    staleMobProp=null;
+    while((staleMobProp=Entities.FindByClassname(staleMobProp,staleClass))!=null) {
+    local name=staleMobProp.GetName(),prefix="l4d2mc_entity_";
+    if(name==null || name.find(prefix)!=0 || name.len()<=prefix.len() || staleMobProp.GetModelName()!="models/l4d2mc/cube.mdl")continue;
+    local owned=true;
+    for(local i=prefix.len();i<name.len();i++)if(name[i]<48 || name[i]>57)owned=false;
+    if(owned)staleMobProps.append(staleMobProp);
+    }
+}
+foreach(prop in staleMobProps)if(prop.IsValid())prop.Kill();
 PrecacheModel("models/l4d2mc/cube.mdl");
 ::L4D2MCBridge <- { frame = 0, anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
 IncludeScript("l4d2mc_gameplay");
@@ -140,7 +154,7 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
     L4D2MCBridge.frame++;
     local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"hit\":%s,\"normal\":%s,\"buttons\":%d}",
         L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,surface,normal,player.GetButtonMask());
-    data=data.slice(0,data.len()-1)+",\"visible\":"+(visible?"true":"false")+",\"nativeuse\":"+(NetProps.HasProp(player,"m_afButtonForced")?"true":"false")+",\"usable\":"+(L4D2MCBridge.Usable(player)?"true":"false")+",\"actors\":"+L4D2MCBridge.ActorJson(player)+",\"wheel\":"+L4D2MCBridge.gameplay.wheel+",\"replies\":[";
+    data=data.slice(0,data.len()-1)+",\"visible\":"+(visible?"true":"false")+",\"nativeuse\":false"+",\"usable\":"+(L4D2MCBridge.Usable(player)?"true":"false")+",\"actors\":"+L4D2MCBridge.ActorJson(player)+",\"wheel\":"+L4D2MCBridge.gameplay.wheel+",\"replies\":[";
     local replyCount=0;foreach(id,reply in L4D2MCBridge.gameplay.replies)data+=(replyCount++==0?"":",")+reply;
     data+= "],\"physground\":[";
     for(local i=0;i<L4D2MCBridge.gameplay.ground.len();i++)data+=(i==0?"":",")+L4D2MCBridge.gameplay.ground[i];

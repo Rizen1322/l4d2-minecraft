@@ -215,3 +215,26 @@ entities and reacts to Source geometry; mob damage/proxies with cleanup leases.
 2026-10-08 user requests cursor/pearls/chorus/map interactions/AI/other maps/loading UI; explicitly forbids launching games. Prepared code without starting games: source pteleport+chorus data events; pearl traces Source surfaces and discards guest pearl on acknowledged hit; Source destination floor+hull ray sampling because retail TraceHull is absent, resets velocity/fall speed. Chorus consume effect requests Source floor search.8-field gameplay header carries held mouse actions; Source m_afButtonForced gets IN_USE and IN_ATTACK only for carry/pour map items, original bits saved/restored; Java nativeuse suppresses duplicate door Toggle. Goal-driven proxy pursuits now move against transient Source collision planes, sidestep collisions; ranged attack and creeper swelling handled separately. Brain-driven hostiles remain a limitation. Loader accepts -Map and reattaches on transitions. New depth capture selects largest full-resolution world-camera pass (D3D9 shader-readable texture only, MSAA/surfaces retain GenericDepth fallback), explicit API20 x86 handle ABI slots10/13 checked by read-only review. Shader gains MC_HOST_DEPTH optional semantic. Loading/cutscene/externalfreeze flags gate Minecraft composition and relay. Cursor handling retains dc_none and pending focus activation; perworld Windows cursor hiding is reversible, no window subclass.34Python tests, Java/native builds and launcher parser pass. Source/Minecraft are closed; new gameplay/depth/cursor slice installed but explicitly NOT runtime-verified.
 
 Final offline verification:35Python tests pass. Added native read-only render-ready status shared channel and launcher/HostInput command deferral during loading, test confirms no process launch while Source unready. Largest depth pass excludes non-screen-size buffers/shader-unreadable surfaces; cursor counter restoration retains outside-app cursor. Five installed files SHA256 match builds. No game launched after user prohibition.
+
+
+2026-10-08 offline regression correction after user screenshots/reports:
+- Removed experimental source_depth hooks from active compositor, restored FX
+  byte-for-byte to verified camera baseline 2550c2a. Generic Depth remains;
+  other maps have no runtime verification.
+- Advertise nativeuse=false, restore explicit door/button interact, exclude
+  those targets from forced Use to avoid duplicate Toggle.
+- Remove Source mob collider creation; clean old owned numbered cube props
+  at script attach. Guest mobs remain visible and combat-capable; Source player
+  may pass through them. Building blocks retain their collision props.
+- Wider/three-height wall probes and bounded terrain anchor. Read-only review
+  found opposing startsolid probes could cage a partially embedded mob;
+  reverse probes now select a nearest shallow escape direction. Deep ambiguous
+  intersections withhold new support instead of publishing an unbounded path.
+- User forbids opening games. Offline builds/tests/install only; runtime
+  occlusion, door, mob escape and movement behavior are still pending.
+
+Final regression checkpoint: Java/native build succeeded (x86 AddonInit verified),
+35 Python tests passed, diff whitespace check passed. Final read-only review found
+no further concrete errors in escape bounds, coordinate signs or owned-prop
+cleanup. Five own installed files match their source/build SHA256. No games
+launched or operated; live behavior is explicitly unverified.

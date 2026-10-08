@@ -2,7 +2,6 @@
 #include <algorithm>
 #include "source_camera.h"
 #include "source_input.h"
-#include "source_depth.h"
 #include "compositor.h"
 #include <windows.h>
 #include <algorithm>
@@ -394,8 +393,6 @@ namespace
 		// Minecraft frame is here. (Toggling techniques from inside this callback crashes ReShade.)
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McActive"); v.handle != 0)
 			runtime->set_uniform_value_bool(v, on);
-        const bool ownDepth=source_depth::finish(runtime,commands);
-        if(const auto v=find_uniform(runtime,kEffect,"UseCapturedHostDepth");v.handle)runtime->set_uniform_value_bool(v,ownDepth);
         if (const auto v=find_uniform(runtime,kEffect,"DebugView");v.handle) runtime->set_uniform_value_int(v,g_debugMode<=3?int(g_debugMode):0);
         if (const auto v=find_uniform(runtime,kEffect,"HostOcclusion");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=4);
         if (const auto v=find_uniform(runtime,kEffect,"Reproject");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=5);
@@ -484,7 +481,7 @@ namespace
         static uint64_t lastAccepted=0,lastInputAccepted=0;
         const auto inputNow=GetTickCount64();
         g_guestInputAlive=lastInputAccepted>0 && inputNow>=lastInputAccepted && inputNow-lastInputAccepted<1000;
-        if(GetTickCount64()-lastAccepted>=500) {compositor::set_active(false);source_depth::enabled=false;}
+        if(GetTickCount64()-lastAccepted>=500) {compositor::set_active(false);}
 		static HANDLE mapping = nullptr;
 		static const uint8_t *view = nullptr;
 		if (!view) {
@@ -508,9 +505,6 @@ namespace
 		const bool fresh = GetTickCount64() >= timestamp && GetTickCount64() - timestamp < 500;
 		compositor::set_active(fresh);
         if(fresh) lastAccepted=timestamp;
-        source_depth::enabled=fresh && g_sceneVisible;
-        source_depth::eyeX=x;source_depth::eyeY=y;source_depth::eyeZ=z;
-        source_depth::fov=g_hostPoseCount?g_hostPoses[(g_hostPoseCount-1)&3].fov:104.8f;
 		if (fresh) {
             source_camera::Sample actual{};
             static source_camera::Sample lastCamera{};
@@ -543,7 +537,6 @@ namespace
 
 	void on_destroy_effect_runtime(effect_runtime *runtime)
 	{
-		source_depth::destroy(runtime->get_device());
 		destroy_layers(runtime->get_device());
 	}
 }
@@ -560,7 +553,7 @@ namespace compositor
 		reshade::register_event<reshade::addon_event::reshade_present>(on_present);
 		reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(on_reloaded_effects);
 		reshade::register_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
-		source_depth::register_hooks();
+        // Experimental capture is disabled until its depth output is validated.
 		g_registered = true;
 		reshade::log::message(reshade::log::level::info, "MCPassthrough: registered");
 		return true;
