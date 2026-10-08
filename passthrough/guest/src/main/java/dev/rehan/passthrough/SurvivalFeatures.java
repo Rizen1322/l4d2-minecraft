@@ -1,6 +1,5 @@
 package dev.rehan.passthrough;
 
-import java.util.Locale;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.minecraft.commands.Commands;
@@ -58,8 +57,7 @@ public final class SurvivalFeatures {
     public static void tick(MinecraftServer s){
         if(++ticks%4!=0 || !Passthrough.active || !MapBuilds.ready || !privateWorld(s))return;
         var players=s.getPlayerList().getPlayers();if(players.isEmpty())return;ServerPlayer p=players.getFirst();
-        Passthrough.events.accept(String.format(Locale.ROOT,"{\"t\":\"equipment\",\"armor\":%.2f,\"toughness\":%.2f,\"blocking\":%b}",
-            Math.clamp(p.getArmorValue(),0,20),Math.clamp(p.getAttributeValue(Attributes.ARMOR_TOUGHNESS),0,20),p.isBlocking()));
+        Passthrough.events.accept(GuestMessages.equipment(p.getArmorValue(),p.getAttributeValue(Attributes.ARMOR_TOUGHNESS),p.isBlocking()));
         // Prevent independent Minecraft death/starvation; Source is authoritative.
         p.getAbilities().invulnerable=true;
         if(p.getFoodData().getFoodLevel()>14)p.getFoodData().setFoodLevel(14);

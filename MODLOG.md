@@ -293,3 +293,16 @@ Updated guest JAR installed with matching SHA256. Read-only review confirmed
 no world chunk lookup remains in CHUNK_LOAD callback. Existing Minecraft still
 runs the old loaded classes; normal user restart is required, no restart/kill
 was performed by agent. No archive existed during observed loading hang.
+
+
+2026-10-08 23:52:18 server crash report: IllegalFormatConversionException
+f != java.lang.Integer at SurvivalFeatures.tick:61. Latest log confirms prior
+chunk lookup fix worked (spawn loading completed1493ms, player joined). Root:
+getArmorValue/Math.clamp(int) passed Integer to %.2f formatter. Extracted pure
+GuestMessages equipment serializer with %d for armor and bounded finite double
+for toughness. Standalone JVM regression reproduced the exact exception before
+fix, passes afterwards for armor0/20, out-of-range values, German default locale
+and NaN toughness. verifyGuestMessages is required by Gradle check/build; no
+Minecraft process started by test. Java build and40Python tests pass. Fixed JAR
+installed and SHA256 matched. No saves modified/restored, no game launched;
+next normal user launch remains required for in-game confirmation.

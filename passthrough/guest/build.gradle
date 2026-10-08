@@ -44,3 +44,14 @@ java {
 	sourceCompatibility = JavaVersion.VERSION_25
 	targetCompatibility = JavaVersion.VERSION_25
 }
+
+// Pure JVM protocol checks; this does not start Minecraft.
+tasks.register('verifyGuestMessages', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.GuestMessagesTest'
+}
+check.dependsOn verifyGuestMessages
+
+// Tests here are standalone main programs run by verifyGuestMessages, not JUnit.
+tasks.named('test') { failOnNoDiscoveredTests = false }
