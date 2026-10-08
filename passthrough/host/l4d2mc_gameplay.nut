@@ -172,6 +172,8 @@ L4D2MCBridge.Event <- function(fields,player) {
             try {EntFire(name,"Explode","",0,player);}catch(error){blast.Kill();throw error;}
         }
         printl("[L4D2MC COMBAT] explosion "+p+" radius="+radius);
+    } else if(kind=="rewardack" && fields.len()==4) {
+        RewardAck(fields[3]);
     } else if(kind=="link" && fields.len()==6) {
         Link(fields,player);
     } else if(kind=="meal" && fields.len()==5) {
@@ -207,7 +209,9 @@ L4D2MCBridge.Event <- function(fields,player) {
             local tier=fields.len()==7?Integer(fields[6]):0;if(tier>2)throw "invalid sword tier";
             if(tier>0) {
                 if("swordAt" in survival && Time()-survival.swordAt<0.35)return;
-                survival.swordAt<-Time();damage=tier==2?220.0:180.0;
+                survival.swordAt<-Time();
+                local extra=damage/15-(tier==2?8:7);if(extra<0)extra=0;
+                damage=(tier==2?220.0:180.0)+extra*15;
                 if(trace.enthit.GetClassname()=="infected")damage=trace.enthit.GetHealth()+1.0;
             }
             trace.enthit.TakeDamage(damage,128,player); // DMG_CLUB, Source attribution retained.
@@ -441,6 +445,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
         else if(f.len()>0 && f[0]=="nav")try{NavRequest(f,player);}catch(error){printl("[L4D2MC NAV] "+error);}
         else if(f.len()>0 && f[0]=="projectile")try{Projectile(f,player);}catch(error){printl("[L4D2MC PROJECTILE] "+error);}
         else if(f.len()>0 && f[0]=="signal")try{Signal(f,player);}catch(error){printl("[L4D2MC SIGNAL] "+error);}
+        else if(f.len()>0 && f[0]=="protection")try{ProtectionEquipment(f);}catch(error){printl("[L4D2MC PROTECTION] "+error);}
         else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
         else if(f.len()>0 && f[0]=="physics")try{Physics(f,player);}catch(error){printl("[L4D2MC PHYSICS] "+error);}
     }

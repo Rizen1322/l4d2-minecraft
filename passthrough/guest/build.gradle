@@ -62,3 +62,17 @@ tasks.register('verifyNavCursor', JavaExec) {
     mainClass = 'dev.rehan.passthrough.NavCursorTest'
 }
 check.dependsOn verifyNavCursor
+
+tasks.register('verifyRewardPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.RewardPolicyTest'
+}
+check.dependsOn verifyRewardPolicy
+
+tasks.register('verifyViewSizePolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.ViewSizePolicyTest'
+}
+check.dependsOn verifyViewSizePolicy

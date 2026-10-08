@@ -5,6 +5,15 @@ from combat import GameplayMailbox,source_position
 
 
 class CombatTests(unittest.TestCase):
+    def test_enchantments_and_effects_expire_with_equipment(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'protection','e':[4,12,4,16,4],'resistance':2,'fireproof':True})
+            box.publish('c1m1_hotel');self.assertIn('protection 4 12 4 16 4 2 1',box.path.read_text())
+            for bad in [True,21,float('nan')]:
+                with self.assertRaises(ValueError):box.apply({'t':'protection','e':[bad,0,0,0,0],'resistance':0,'fireproof':False})
+            box.publish('c1m2_streets');self.assertNotIn('protection',box.path.read_text())
+
     def test_ignition_is_bounded_data_and_never_replayed_across_maps(self):
         with tempfile.TemporaryDirectory() as d:
             box=GameplayMailbox(Path(d)/'effects')

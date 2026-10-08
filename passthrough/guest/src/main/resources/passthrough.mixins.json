@@ -5,6 +5,8 @@
   "mixins": [
     "ArrowDamageAccessor",
     "FoodHealMixin",
+    "HostHealingMixin",
+    "RewardAccountMixin",
     "ChorusTeleportMixin",
     "HostCollisionMixin",
     "HostEntityTickMixin",

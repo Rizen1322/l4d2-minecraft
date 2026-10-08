@@ -24,6 +24,7 @@ import java.util.Locale;
 /** Host input, applied on the client thread: the host window has the focus, so Minecraft never sees these itself. */
 final class ClientInput {
 	private static double pointerX, pointerY;
+    private static final dev.rehan.passthrough.ViewSizePolicy viewSize=new dev.rehan.passthrough.ViewSizePolicy();
 	private ClientInput() {
 	}
 	static void releaseRelay(final Minecraft minecraft) {
@@ -159,13 +160,10 @@ final class ClientInput {
 				}
 			}
 			case "view" -> {
-				// match the host's picture exactly: un-minimize/un-maximize first (resizing a maximized window is ignored)
+                // Idempotent: reconnects must not restore/resize a matching window.
 				int w = m.get("w").getAsInt(), h = m.get("h").getAsInt();
-				long handle = minecraft.getWindow().handle();
-				SDLVideo.SDL_RestoreWindow(handle);
-				minecraft.getWindow().setWindowed(w, h);
-				SDLVideo.SDL_SetWindowSize(handle, w, h);
-				SDLVideo.SDL_SyncWindow(handle);
+                if(!viewSize.accept(w,h,minecraft.getWindow().getScreenWidth(),minecraft.getWindow().getScreenHeight()))return;
+                minecraft.getWindow().setWindowed(w,h);
 			}
 			default -> {
 			}

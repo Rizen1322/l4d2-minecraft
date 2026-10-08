@@ -1,5 +1,12 @@
 ﻿param([string]$Game = 'E:\SteamLibrary\steamapps\common\Left 4 Dead 2', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
 $ErrorActionPreference = 'Stop'
+$existingBridge=Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {
+    $_.CommandLine -match 'l4d2-minecraft[\\/]passthrough[\\/]bridge.py'
+}
+if ($existingBridge) { throw 'A Minecraft bridge is already running. Close its launcher before starting another.' }
+$launcherCreated=$false
+$launcherMutex=[Threading.Mutex]::new($true,'Local\L4D2MinecraftLauncher',[ref]$launcherCreated)
+if (!$launcherCreated) { $launcherMutex.Dispose();throw 'L4D2MC launcher is already running.' }
 $taskRoot = $PSScriptRoot
 $gameExe = Join-Path $Game 'left4dead2.exe'
 $addonList = Join-Path $Game 'left4dead2\addonlist.txt'
@@ -126,6 +133,7 @@ try {
     [IO.File]::WriteAllBytes($addonList, $initialAddons)
     if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }
     if ($bridgeProcess -and !$bridgeProcess.HasExited) { Stop-Process -Id $bridgeProcess.Id }
+    $launcherMutex.Dispose()
     Restore-ControlFile $controlSnapshot
     if (Test-Path -LiteralPath $cfg) { Remove-Item -LiteralPath $cfg }
     if (!$hostProcess -or $hostProcess.HasExited) {

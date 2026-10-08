@@ -81,6 +81,21 @@ def movement_mask(pressed,bindings):
         if key in pressed:mask|=bits
     return mask
 
+class RewardOutbox:
+    def __init__(self,path):self.path=path
+    def read(self):
+        try:content=self.path.read_text(encoding='ascii').rstrip('\x00\r\n ')
+        except (OSError,UnicodeError):return []
+        if len(content)>8192:return []
+        result=[]
+        for line in content.splitlines()[:32]:
+            fields=line.split()
+            if len(fields)!=4:continue
+            key,map_name,finale,difficulty=fields
+            if not re.fullmatch(r'[A-Za-z0-9_]{1,128}',key) or not re.fullmatch(r'[A-Za-z0-9_]{1,96}',map_name) or finale not in ('0','1') or difficulty not in ('0','1','2'):continue
+            result.append({'t':'chapterreward','key':key,'map':map_name,'finale':finale=='1','difficulty':int(difficulty)})
+        return result
+
 class SourceSnapshot:
     """Retain a validated pose through a partial StringToFile write, never indefinitely."""
     def __init__(self,path):self.path=path;self.sample=None;self.identity=None;self.changed=-1e30
@@ -463,6 +478,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
     collision = CollisionSnapshot(sample_path.with_name('l4d2mc_collision.txt'))
     gameplay = GameplayMailbox(sample_path.with_name('l4d2mc_gameplay.txt'))
     source=SourceSnapshot(sample_path)
+    rewards=RewardOutbox(sample_path.with_name('l4d2mc_rewards.txt'))
     last_frame = None
     while True:
         try:
@@ -484,6 +500,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                 last_render = None
                 last_wheel = None
                 last_gameplay = 0.0
+                last_rewards=0.0
                 guest_map = None
                 map_ready = False
                 last_world_request = 0.0
@@ -500,7 +517,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 guest_map=session;map_ready=False
                                 collision.cells.clear()
                                 gameplay.events.clear();gameplay.mobs.clear();gameplay.physics.clear();gameplay.projectiles.clear()
-                                gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[]
+                                gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[];gameplay.protection=None
                                 last_frame=None;last_render=None
                                 last_world_request=0.0
                             if time.monotonic()-last_world_request>1.0:
@@ -546,6 +563,9 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                     last_wheel=wheel
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
+                    if time.monotonic()-last_rewards>1.0:
+                        for reward in rewards.read():await socket.send(json.dumps(reward))
+                        last_rewards=time.monotonic()
                     host_menu=render.menu_open()
                     if host_menu and not was_host_menu:
                         await socket.send(json.dumps({'t':'key','k':'escape','down':True}))
@@ -589,6 +609,8 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                     # below the guest's 120 FPS. Poll at ~250Hz without busy-waiting.
                     await asyncio.sleep(0.003)
         except (OSError, websockets.exceptions.ConnectionClosed) as error:
+            if isinstance(error,websockets.exceptions.ConnectionClosed) and error.rcvd and error.rcvd.code==1008:
+                raise RuntimeError('Minecraft is already owned by another bridge; stop the older launcher') from error
             host_input.set_gui(False)
             collision.cells.clear()
             if collision.map:
@@ -608,7 +630,17 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if not 320 <= arguments.width <= 3840 or not 240 <= arguments.height <= 2160:
         parser.error("unsupported guest dimensions")
+    lock=None
     try:
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+        kernel.CreateMutexW.restype=ctypes.c_void_p
+        lock=kernel.CreateMutexW(None,True,r'Local\L4D2MinecraftBridge')
+        if not lock:raise OSError('cannot acquire bridge lock')
+        if ctypes.get_last_error()==183:
+            kernel.CloseHandle(ctypes.c_void_p(lock));lock=None
+            raise SystemExit('Another Minecraft bridge is already running. Close its launcher first.')
         asyncio.run(transmit(arguments))
     except KeyboardInterrupt:
         pass
+    finally:
+        if lock:kernel.CloseHandle(ctypes.c_void_p(lock))

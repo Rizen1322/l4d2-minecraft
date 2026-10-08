@@ -1,7 +1,7 @@
 // Own bridge extension, no replacement of map/director scripts.
 if(!("survival" in L4D2MCBridge))L4D2MCBridge.survival<-{
     equipmentAt=-100.0,armor=0.0,toughness=0.0,blocking=false,player=null,
-    meal=0.0,nextMeal=0.0,nextPressure=0.0,pressureIndex=0,replySerial=RandomInt(1000000000,1500000000),hook=false,hookLiveAt=-100.0,links={},shieldHits={},fires=[],nextShield=0.0,nextIgnite=0.0,golems={},nextAggro=0.0,aggroHits={}};
+    protectionAt=-100.0,epf=[0,0,0,0,0],resistance=0,fireproof=false,meal=0.0,nextMeal=0.0,nextPressure=0.0,pressureIndex=0,replySerial=RandomInt(1000000000,1500000000),hook=false,hookLiveAt=-100.0,links={},shieldHits={},fires=[],nextShield=0.0,nextIgnite=0.0,golems={},nextAggro=0.0,aggroHits={}};
 L4D2MCBridge.Reply <- function(body) {
     local count=0;foreach(id,value in gameplay.replies)count++;
     if(count>=64)return;
@@ -26,25 +26,47 @@ L4D2MCBridge.Heal <- function(player,amount) {
         NetProps.SetPropFloat(player,"m_healthBuffer",b<room?b:room);
     }
 };
-L4D2MCBridge.Protection <- function(victim,attacker,amount,type=0) {
-    if(!GameplayLease() || victim!=survival.player || Time()-survival.equipmentAt>0.75 || attacker==null || !attacker.IsValid())return 1.0;
-    if(type!=0 && (type&(2|4|128|4096))==0)return 1.0; // No armour/shield against fire, acid or falls.
-    local cls=attacker.GetClassname();
-    if(cls!="infected" && cls!="witch" && !(cls=="player" && !attacker.IsSurvivor()))return 1.0;
-    local tank=cls=="player" && attacker.GetZombieType()==8;
-    if(survival.blocking && !tank) {
-        local delta=attacker.GetOrigin()-victim.GetOrigin();delta.z=0;
-        local forward=victim.EyeAngles().Forward();forward.z=0;
-        if(delta.Length()>0.001 && forward.Length()>0.001 && (delta.x*forward.x+delta.y*forward.y)/(delta.Length()*forward.Length())>=0.5) {
-            Reply(format("\"t\":\"equipmenthit\",\"d\":%d,\"shield\":true",amount.tointeger()>0?amount.tointeger():1));
-            return 0.1;
-        }
+L4D2MCBridge.ProtectionEquipment <- function(f) {
+    if(f.len()!=8)return;
+    local values=[];for(local i=1;i<=5;i++){local v=Number(f[i],20);if(v<0)return;values.append(v);}
+    local resist=Integer(f[6]),fire=Integer(f[7]);if(resist>4 || fire>1)return;
+    survival.epf=values;survival.resistance=resist;survival.fireproof=fire==1;survival.protectionAt=Time();
+};
+// Pure damage arithmetic, shared by pre-damage and ordinary-coop refund paths.
+L4D2MCBridge.ProtectionRatio <- function(amount,type,armor,toughness,epf,resistance,fireproof,enemy) {
+    local burn=(type&8)!=0,fall=(type&32)!=0,blast=(type&64)!=0,bullet=(type&(2|536870912))!=0;
+    local physical=bullet || blast || (type&(4|128|4096|2097152))!=0 || (type==0 && enemy);
+    if(burn && fireproof)return 0.0;
+    local ratio=1.0;
+    if(physical && !fall && !burn) {
+        local effective=armor-(amount/5.0)/(2+toughness/4);
+        if(effective<armor*0.2)effective=armor*0.2;if(effective>20)effective=20;
+        ratio*=1-effective/25;
     }
-    local effective=survival.armor-(amount/5.0)/(2+survival.toughness/4);
-    if(effective<survival.armor*0.2)effective=survival.armor*0.2;
-    if(effective>20)effective=20;
-    if(survival.armor>0)Reply(format("\"t\":\"equipmenthit\",\"d\":%d,\"shield\":false",amount.tointeger()>0?amount.tointeger():1));
-    return 1-effective/25;
+    local protection=epf[fall?3:burn?1:blast?2:bullet?4:0];
+    ratio*=1-protection/25;
+    // Resistance never makes the wearer invulnerable; Fire Resistance is explicit immunity to burn.
+    ratio*=1-resistance*0.2;
+    return ratio;
+};
+L4D2MCBridge.Protection <- function(victim,attacker,amount,type=0) {
+    if(!GameplayLease() || victim!=survival.player || Time()-survival.equipmentAt>0.75)return 1.0;
+    local enemy=false,tank=false;
+    if(attacker!=null && attacker.IsValid()) {
+        local cls=attacker.GetClassname();
+        enemy=cls=="infected" || cls=="witch" || (cls=="player" && !attacker.IsSurvivor());
+        tank=cls=="player" && !attacker.IsSurvivor() && attacker.GetZombieType()==8;
+    }
+    local physical=(type&(2|4|128|4096|2097152|536870912))!=0 || (type==0 && enemy);
+    if(physical && enemy && survival.blocking && !tank && ShieldFacing(victim,attacker)) {
+        Reply(format("\"t\":\"equipmenthit\",\"d\":%d,\"shield\":true",amount.tointeger()>0?amount.tointeger():1));
+        return 0.1;
+    }
+    local epf=[0,0,0,0,0],resist=0,fire=false;
+    if(Time()-survival.protectionAt<=0.75){epf=survival.epf;resist=survival.resistance;fire=survival.fireproof;}
+    if((physical || (type&64)!=0) && survival.armor>0)
+        Reply(format("\"t\":\"equipmenthit\",\"d\":%d,\"shield\":false",amount.tointeger()>0?amount.tointeger():1));
+    return ProtectionRatio(amount,type,survival.armor,survival.toughness,epf,resist,fire,enemy);
 };
 L4D2MCBridge.InstallProtection <- function() {
     // Scripted mutations expose a pre-damage callback. Preserve their existing
@@ -124,7 +146,7 @@ L4D2MCBridge.IgniteGround <- function(f,player) {
 L4D2MCBridge.SurvivalCleanup <- function() {
     foreach(v in survival.fires)if(v.entity.IsValid())v.entity.Kill();survival.fires.clear();
     foreach(id,v in survival.golems)if(v.entity.IsValid())v.entity.Kill();survival.golems.clear();
-    survival.blocking=false;survival.shieldHits.clear();survival.aggroHits.clear();
+    survival.blocking=false;survival.protectionAt=-100.0;survival.shieldHits.clear();survival.aggroHits.clear();
 };
 // Eight non-solid invisible targets, not collision stand-ins. Native infected navigation pursues them.
 L4D2MCBridge.GolemTarget <- function(f,player) {
@@ -211,6 +233,12 @@ L4D2MCBridge.SurvivalTick <- function(player) {
 // Register once. Callbacks look up the current bridge after script reconnects.
 if(!("L4D2MCSurvivalEvents" in getroottable())) {
     ::L4D2MCSurvivalEvents <- {
+        OnGameEvent_map_transition=function(event) {
+            if("L4D2MCBridge" in getroottable())L4D2MCBridge.ChapterReward(false);
+        },
+        OnGameEvent_finale_win=function(event) {
+            if("L4D2MCBridge" in getroottable())L4D2MCBridge.ChapterReward(true);
+        },
         OnGameEvent_round_start=function(event) {
             if("L4D2MCBridge" in getroottable()){L4D2MCBridge.epoch=RandomInt(1,2000000000);L4D2MCBridge.SurvivalCleanup();}
         },
@@ -266,4 +294,45 @@ L4D2MCBridge.Signal <- function(fields,player) {
         else if(on==1)EntFire(link.name,"Press","",0,player);
         link.on=on;
     }
+};
+
+
+// Outbox survives the Source VM being recreated at chapter load.
+L4D2MCBridge.AtChapterExit <- function(player) {
+    local found=false;
+    foreach(cls in ["info_changelevel","trigger_changelevel"]) {
+        local e=null;
+        while((e=Entities.FindByClassname(e,cls))!=null) {
+            if(!NetProps.HasProp(e,"m_Collision.m_vecMins") || !NetProps.HasProp(e,"m_Collision.m_vecMaxs"))continue;
+            found=true;local p=player.GetOrigin()+Vector(0,0,24),origin=e.GetOrigin();
+            local lo=origin+NetProps.GetPropVector(e,"m_Collision.m_vecMins"),hi=origin+NetProps.GetPropVector(e,"m_Collision.m_vecMaxs");
+            if(p.x>=lo.x-32 && p.x<=hi.x+32 && p.y>=lo.y-32 && p.y<=hi.y+32 && p.z>=lo.z-32 && p.z<=hi.z+32)return true;
+        }
+    }
+    // Custom maps without a standard changelevel volume rely on the successful transition event.
+    return !found;
+};
+L4D2MCBridge.ChapterReward <- function(finale) {
+    local player=survival.player;
+    if(player==null || !player.IsValid() || player.GetHealth()<=0 || player.IsIncapacitated() || !gameplay.armed)return;
+    if(!finale && !AtChapterExit(player))return;
+    local map=Director.GetMapName(),key=map+"_"+epoch;
+    local text=FileToString("l4d2mc_rewards.txt"),rows=text!=null?split(text,"\r\n"):[];
+    local out=[],found=false;
+    foreach(row in rows) {
+        local f=split(row," ");if(f.len()!=4)continue;
+        if(f[0]==key){found=true;if(finale)row=key+" "+map+" 1 "+f[3];}
+        out.append(row);
+    }
+    if(!found) {
+        if(out.len()>=32){printl("[L4D2MC] Reward outbox full; pending entries retained");return;}
+        local difficulty=Convars.GetStr("z_difficulty"),bonus=difficulty=="Impossible"?2:difficulty=="Hard"?1:0;
+        out.append(key+" "+map+" "+(finale?"1":"0")+" "+bonus);
+    }
+    local data="";foreach(row in out)data+=row+"\n";StringToFile("l4d2mc_rewards.txt",data);
+};
+L4D2MCBridge.RewardAck <- function(key) {
+    local text=FileToString("l4d2mc_rewards.txt");if(text==null)return;
+    local data="";foreach(row in split(text,"\r\n")) {local f=split(row," ");if(f.len()==4 && f[0]!=key)data+=row+"\n";}
+    StringToFile("l4d2mc_rewards.txt",data);
 };

@@ -3,10 +3,18 @@ import unittest
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
-from bridge import CollisionSnapshot, camera, position, surface, render_camera, relay_keys,HostInput,SourceSnapshot,parse_movement_bindings,movement_mask
+from bridge import CollisionSnapshot, camera, position, surface, render_camera, relay_keys,HostInput,SourceSnapshot,parse_movement_bindings,movement_mask,RewardOutbox
 
 
 class SessionTests(unittest.TestCase):
+    def test_rewards_survive_map_load_and_invalid_tokens_are_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'rewards';box=RewardOutbox(path)
+            path.write_text('c1m1_hotel_1 c1m1_hotel 0 2\nbad;quit c1m2_streets 0 0\nc1m4_atrium_2 c1m4_atrium 1 1\x00')
+            rewards=box.read();self.assertEqual(len(rewards),2)
+            self.assertEqual(rewards[0]['difficulty'],2);self.assertTrue(rewards[1]['finale'])
+            path.write_text('x'*9000);self.assertEqual(box.read(),[])
+
     def test_partial_source_write_keeps_last_valid_sample(self):
         with tempfile.TemporaryDirectory() as directory:
             file=Path(directory)/'pose'
@@ -23,6 +31,19 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(movement_mask({0x45},bindings),0)
 
 class InputTests(unittest.TestCase):
+    @unittest.skipUnless(__import__('sys').platform=='win32','Windows named mutex')
+    def test_second_bridge_exits_before_connecting_or_touching_games(self):
+        import ctypes,subprocess,sys
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True);kernel.CreateMutexW.restype=ctypes.c_void_p
+        lock=kernel.CreateMutexW(None,True,r'Local\L4D2MinecraftBridge')
+        if not lock:self.fail('Cannot create regression lock')
+        try:
+            child=subprocess.run([sys.executable,str(Path(__file__).with_name('bridge.py'))],capture_output=True,text=True,timeout=5)
+            self.assertNotEqual(child.returncode,0)
+            self.assertIn('already running',child.stderr)
+            self.assertNotIn('connected',child.stdout)
+        finally:kernel.CloseHandle(ctypes.c_void_p(lock))
+
     def test_escape_is_owned_by_source_in_inventory_and_world(self):
         for gui in (True,False):
             state={}

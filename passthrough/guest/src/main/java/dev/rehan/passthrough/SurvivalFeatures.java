@@ -41,6 +41,13 @@ public final class SurvivalFeatures {
                 boolean ok=RedstoneLinks.link(p);
                 p.sendSystemMessage(Component.literal(ok?"Link requested: nearest switch -> Source door/button in your crosshair.":"Place a lever/pressure plate within 6 blocks first."));return ok?1:0;
             }));
+            root.then(Commands.literal("supplies").executes(ctx->{
+                ServerPlayer p=ctx.getSource().getPlayerOrException();if(!privateWorld(p.level().getServer()))return 0;
+                var account=((RewardAccount)p).l4d2mc$rewards();
+                if(account==null){p.sendSystemMessage(Component.literal("Reward ledger needs recovery; rewards are retained."));return 0;}
+                CampaignRewards.deliver(p.level().getServer(),p);
+                p.sendSystemMessage(Component.literal("Reserved supplies: "+account.reserve));return 1;
+            }));
             root.then(golem).then(Commands.literal("save").executes(ctx->{
                 if(!privateWorld(ctx.getSource().getServer()))return 0;
                 try{MapBuilds.save();ctx.getSource().sendSuccess(()->Component.literal("Map builds saved."),false);return 1;}
@@ -59,6 +66,17 @@ public final class SurvivalFeatures {
         if(++ticks%4!=0 || !Passthrough.active || !MapBuilds.ready || !privateWorld(s))return;
         var players=s.getPlayerList().getPlayers();if(players.isEmpty())return;ServerPlayer p=players.getFirst();
         Passthrough.events.accept(GuestMessages.equipment(p.getArmorValue(),p.getAttributeValue(Attributes.ARMOR_TOUGHNESS),p.isBlocking()));
+        var sources=p.damageSources();
+        var general=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.generic());
+        var fire=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.inFire());
+        var blast=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.explosion(null,null));
+        var fall=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.fall());
+        var projectile=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.arrow(null,null));
+        var resistance=p.getEffect(net.minecraft.world.effect.MobEffects.RESISTANCE);
+        Passthrough.events.accept(String.format(java.util.Locale.ROOT,
+            "{\"t\":\"protection\",\"e\":[%.2f,%.2f,%.2f,%.2f,%.2f],\"resistance\":%d,\"fireproof\":%b}",
+            general,fire,blast,fall,projectile,resistance==null?0:Math.min(4,resistance.getAmplifier()+1),p.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE)));
+        CampaignRewards.deliver(s,p);
         // Prevent independent Minecraft death/starvation; Source is authoritative.
         p.getAbilities().invulnerable=true;
         if(p.getFoodData().getFoodLevel()>14)p.getFoodData().setFoodLevel(14);
@@ -92,9 +110,11 @@ public final class SurvivalFeatures {
         MinecraftServer s=WorldBridge.server();if(s==null || amount<0 || amount>100)return;
         s.execute(()->{var players=s.getPlayerList().getPlayers();if(players.isEmpty() || !Passthrough.active)return;
             ServerPlayer p=players.getFirst();
-            if(shield && p.getUseItem().is(Items.SHIELD))p.getUseItem().hurtAndBreak(amount,p,p.getUsedItemHand());
+            if(p.isCreative())return;
+            int wear=Math.max(1,(int)Math.ceil(amount/5.0));
+            if(shield && p.getUseItem().is(Items.SHIELD))p.getUseItem().hurtAndBreak(wear,p,p.getUsedItemHand());
             else for(var slot:new net.minecraft.world.entity.EquipmentSlot[]{net.minecraft.world.entity.EquipmentSlot.HEAD,net.minecraft.world.entity.EquipmentSlot.CHEST,net.minecraft.world.entity.EquipmentSlot.LEGS,net.minecraft.world.entity.EquipmentSlot.FEET})
-                p.getItemBySlot(slot).hurtAndBreak(Math.max(1,amount/4),p,slot);
+                p.getItemBySlot(slot).hurtAndBreak(Math.max(1,wear/4),p,slot);
         });
     }
     public static void supply(double x,double y,double z,int kind){

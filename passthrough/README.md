@@ -260,3 +260,64 @@ Offline: Java build с проверками JSON/здоровья и маршр�
 API references: [Valve: Stagger and DropFire](https://store.steampowered.com/news/posts/?appgroupname=Rockstar+Games&enddate=1369869599&feed=steam_updates),
 [Valve IEngineVGui](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/public/ienginevgui.h),
 [Source navmesh methods](https://github.com/Rayman1103/L4D2CodeUpdate-from-Reactive-Drop/blob/main/TerrorNavArea.cpp.txt).
+
+
+## Броня, предметы и награды — 9 октября
+
+Броня использует Minecraft armor/toughness с переводом5Source HP=1MC HP:
+материалы с большей toughness лучше держат сильный удар. Прочность уменьшается
+в единицах Minecraft, Unbreaking остаётся штатным; creative снаряжение не
+изнашивает. Armor защищает физические удары/пули/взрывы. Fire Protection,
+Blast Protection, Projectile Protection и Feather Falling вычисляются самим
+Minecraft EnchantmentHelper по подходящему DamageSource; Protection действует
+дополнительно. Resistance уменьшает остаток на20% за уровень, максимум80%;
+Fire Resistance даёт иммунитет именно к огню, не кислоте Spitter. Щит остаётся
+направленным и не заменяет броню против Tank/взрыва/падения.
+
+Лечебные зелья и регенерация отправляют реальные Minecraft heal ticks в Source;
+молоко снимает эффекты через обычный Minecraft, heartbeat обновляет защиту.
+Золотое яблоко даёт еду/временное HP Source и свои Resistance/Fire Resistance,
+если они есть у разновидности яблока. Strength усиливает полноценный удар
+мечом; постоянный минимум180/220 не отменяет бонус положительного damage.
+Броня и эффекты в обычном coop имеют fallback возврата несмертельного урона;
+если Director pre-damage hook не вызывается, они не предотвращают incap/смерть
+от первого сильного удара. Это существующее ограничение, не подтверждённая
+полная защита; игровая проверка всё ещё не проводилась.
+
+Награда создаётся по map_transition/finale_win, с проверкой alive и завершённого
+выхода через changelevel volume, если карта его предоставляет. Просто открыть
+дверь, сменить карту консолью или перезапустить уровень награды не даёт.
+Один receipt на Source map+epoch сохраняется вместе с inventory/XP/repair
+в player.dat частного мира. Перед ack выполняется save и чтение фактического
+player.dat: swallowed Minecraft IO errors не удаляют Source outbox.
+Полный инвентарь сохраняет остаток в reserve того же player.dat.
+
+| Награда | Обычная глава |
+|---|---|
+| Еда | 4 хлеба |
+| Стройматериалы | 32 булыжника |
+| Стрелы | 16; Hard24; Expert32 |
+| Железо | 3 слитка; Hard4; Expert5 |
+| Каждая вторая глава | 1 золотое яблоко |
+| Каждая третья глава | 1 алмаз |
+| Опыт и ремонт | 10 XP; ремонт экипированных вещей на10% max durability |
+| Успешный финал | Вместо периодических бонусов: 2 алмаза, 2 золотых яблока, 30XP |
+
+`/l4d2mc supplies` переносит доступный запас в свободные слоты и показывает
+оставшиеся предметы. Новые типы наград не создаются этой командой.
+До256 receipt/player, до10000 единиц каждого предмета в запасе; при лимите
+Source не получает ack и сохраняет запись для восстановления/расширения лимита.
+
+Конфликт размеров: второй launcher/bridge отклоняется, гостю принадлежит один
+WebSocket controller; поздние сообщения/close старого владельца защищены
+lock+generation. Повторный view одного размера больше не вызывает SDL restore
+и resize. Намеренное переключение1280×720/2560×1440 применяется один раз.
+Старый orphan bridge15092 остановлен после того, как игры уже закрылись;
+игровые процессы не запускались и не завершались агентом. Новый crash-report
+не найден: обнаруженный конфликт устранён в коде, полная причина падения ещё
+не подтверждена запуском.
+
+Offline проверки этого обновления:47Python (включая занятый Windows mutex),
+4JVM regression programs (JSON/HP, навигация, награды/ledger, размер окна),
+Source protection arithmetic в автономном Squirrel и компиляция VScript,
+native PE/ABI и PowerShell syntax. Новые Mixin hooks требуют проверки в игре.

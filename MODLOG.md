@@ -332,3 +332,23 @@ union includes bounded validated checkpoint tombstones even with transition.
 Old two-line journals remain supported. Guest rebuilt and reinstalled after
 this repair. Installed SHA256 matches JAR/native/all4VScripts. Diagnostic-only
 collision_probe.nut is intentionally not installed. No games started.
+
+
+2026-10-09 next update: armor enchantment profile via actual MC EnchantmentHelper,
+source damage kinds/fall/fire/blast/projectile, Resistance/Fireproof heartbeat,
+corrected gear wear5Source HP=1MC HP and creative no-wear. Heal mixin routes
+instant-heal/regeneration to Source. Added chapter successful-transition/finale
+outbox, bounded supplies/XP/10% equipped repair and inventory overflow reserve.
+Read-only review caught cross-file payout transaction risk; moved receipt/reserve
+into Player ValueInput/ValueOutput same atomic player.dat unit as items/XP/repair.
+Read-only javap caught saveEverything bool only confirms chunks and swallowed
+player save errors: ack now requires reading actual player.dat reward receipt.
+Invalid custom reward data is preserved unchanged; more rewards fail closed.
+World/profile/player saves not touched by agent, hooks run only private guest.
+Latest MC log00:39-00:40 showed repeated host replaced, orphan1280x720 Python
+bridge15092 still running after games exited. No new crash report found. Stopped
+only verified orphan helper; no game processes touched. Added bridge namedmutex,
+launcher legacy process guard+mutex, single WScontroller lock+generation,
+nonowner message rejection, and idempotent native resize (no RestoreWindow,
+duplicate SDLSetWindowSize/SyncWindow). Build47Python/4pureJVM/Squirrel arithmetic
+and syntax/PSparse pass; runtime crash disappearance/Mixin behavior unverified.

@@ -33,6 +33,8 @@ import org.java_websocket.server.WebSocketServer;
 public final class HostLink extends WebSocketServer {
 	private static HostLink instance;
 	private volatile WebSocket controller;
+    private final Object controllerLock=new Object();
+    private volatile long controllerGeneration;
     private final java.util.LinkedHashSet<Integer> delivered=new java.util.LinkedHashSet<>();
 
 	private HostLink(final int port) {
@@ -66,29 +68,37 @@ public final class HostLink extends WebSocketServer {
 	@Override
 	public void onClose(final WebSocket conn, final int code, final String reason, final boolean remote) {
 		Passthrough.LOG.info("host disconnected ({} {})", code, reason);
-		if (conn == this.controller) {
-			this.controller = null;
-			Minecraft minecraft = Minecraft.getInstance();
-			minecraft.execute(() -> ClientInput.releaseRelay(minecraft));
-		}
+        final long generation;
+        synchronized(controllerLock) {
+            if(conn!=controller)return;
+            controller=null;generation=++controllerGeneration;
+        }
+        Minecraft minecraft=Minecraft.getInstance();
+        minecraft.execute(()->{if(controller==null && controllerGeneration==generation)ClientInput.releaseRelay(minecraft);});
 	}
 
 	@Override
 	public void onMessage(final WebSocket conn, final String message) {
 		try {
 			JsonObject m = JsonParser.parseString(message).getAsJsonObject();
+            if(!m.get("t").getAsString().equals("attach") && conn!=this.controller)return;
             if(m.has("rid"))synchronized(delivered) {
                 int rid=m.get("rid").getAsInt();if(!delivered.add(rid))return;
                 if(delivered.size()>256)delivered.remove(delivered.iterator().next());
             }
 			switch (m.get("t").getAsString()) {
-				case "attach" -> {
-					WebSocket previous = this.controller;
-					this.controller = conn;
-					if (previous != null && previous != conn) previous.close(1000,"host replaced");
-					Minecraft minecraft = Minecraft.getInstance();
-					minecraft.execute(() -> ClientInput.releaseRelay(minecraft));
-				}
+                case "attach" -> {
+                    final long generation;
+                    synchronized(controllerLock) {
+                        WebSocket previous=controller;
+                        if(previous!=null && previous!=conn && previous.isOpen()) {
+                            conn.close(1008,"another host already owns the guest");return;
+                        }
+                        controller=conn;generation=++controllerGeneration;
+                    }
+                    Minecraft minecraft=Minecraft.getInstance();
+                    minecraft.execute(()->{if(controller==conn && controllerGeneration==generation)ClientInput.releaseRelay(minecraft);});
+                }
 				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString(),m.has("epoch")?m.get("epoch").getAsLong():0);
                 case "cam" -> HostState.update(m);
 				case "surface" -> HostState.surface(m);
@@ -119,6 +129,7 @@ public final class HostLink extends WebSocketServer {
                 case "mobpos" -> {
                     var p=m.getAsJsonArray("p");HostTerrain.recover(m.get("id").getAsInt(),p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble());
                 }
+                case "chapterreward" -> dev.rehan.passthrough.CampaignRewards.claim(m.get("key").getAsString(),m.get("map").getAsString(),m.get("finale").getAsBoolean(),m.get("difficulty").getAsInt());
                 case "hosthealth" -> dev.rehan.passthrough.SurvivalFeatures.hostHealth(m.getAsJsonArray("h"));
                 case "equipmenthit" -> dev.rehan.passthrough.SurvivalFeatures.equipmentHit(m.get("d").getAsInt(),m.get("shield").getAsBoolean());
                 case "supply" -> {
@@ -141,7 +152,7 @@ public final class HostLink extends WebSocketServer {
 				case "glide" -> WorldBridge.glide(!m.has("on") || m.get("on").getAsBoolean(), m.has("speed") ? m.get("speed").getAsDouble() : 1.2);
 				default -> {
 					Minecraft minecraft = Minecraft.getInstance();
-					minecraft.execute(() -> ClientInput.handle(minecraft, m));
+					minecraft.execute(() -> {if(controller==conn)ClientInput.handle(minecraft, m);});
 				}
 			}
 		} catch (RuntimeException e) {

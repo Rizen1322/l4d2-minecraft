@@ -13,3 +13,12 @@ python -c "import pefile; p=pefile.PE('dist/L4D2Minecraft.addon32'); assert p.FI
 if ($LASTEXITCODE -ne 0) { throw 'Native binary validation failed' }
 python -m unittest discover -s passthrough -p 'test_*.py'
 if ($LASTEXITCODE -ne 0) { throw 'Camera tests failed' }
+
+if (Test-Path -LiteralPath 'toolchains/squirrel-parser/sq.exe') {
+    foreach ($hostScript in Get-ChildItem -LiteralPath 'passthrough/host' -Filter '*.nut') {
+        & './toolchains/squirrel-parser/sq.exe' -c -o 'dist/syntax-check.cnut' $hostScript.FullName
+        if ($LASTEXITCODE -ne 0) { throw ('VScript syntax failed: ' + $hostScript.Name) }
+    }
+    & './toolchains/squirrel-parser/sq.exe' 'passthrough/test_protection.nut'
+    if ($LASTEXITCODE -ne 0) { throw 'Source protection regression failed' }
+}
