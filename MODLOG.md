@@ -154,3 +154,64 @@ world. Workshop-флаги совпали с launch backup побайтно. В 
 - Non-integral Source support planes now select ceil(normal+) / floor-1(normal-)
   to keep a whole voxel outside brush. Existing builds preserved; potential
   sub-voxel gap documented. 18 Python tests pass. Camera poll ~4ms vs15ms.
+
+
+## 2026-10-08 — Minecraft controls / avatar / combat integration (in progress)
+User requests Steve, Minecraft held items instead of host guns, native Minecraft
+bindings E/LMB/RMB/hotbar/wheel, TNT/creepers/mobs affecting host people/infected.
+Keep existing real-Minecraft passthrough and Source authority for map/movement.
+Use real Minecraft avatar in detached host camera, hide own Source survivor
+render and viewmodel reversibly rather than converting a duplicate Steve mesh.
+Reuse existing guest explosion/MobWar/projectile hooks; add bounded data-only
+Source combat mailbox. No source assets or credentials need copying.
+First slice: control press/hold/release/GUI routing + reversible host key config.
+Checks: no Source shot from mouse1, E opens real inventory, 1–9 and wheel select,
+F5 shows real Steve, sword damages Source infected, TNT blast damages host
+entities and reacts to Source geometry; mob damage/proxies with cleanup leases.
+
+
+### Corrections after user gameplay reports (2026-10-08)
+- User explicitly requests original Source walking/jumping. Removed forced
+  0.627927/0.96175 multipliers and Shift/Ctrl rebinding/relay; Steve crouch now
+  follows Source IN_DUCK. Native Source mouse/look remain authoritative.
+- Confirmed ED_Alloc root in console: thousands of unavailable
+  DoEntFireByInstanceHandle errors after env_explosion spawn, before serial ack.
+  Consume before effects; supported EntFire by unique name; queue Kill first;
+  reserve entity budget; disable physics bone followers and preserve valid leases.
+  Runtime probe: three duplicate events produced one blast, then zero remaining;
+  own infected health500 removed by blast. No user entities were test targets.
+- Source interact uses door Toggle/button Press (Use input is not universal).
+  Runtime own-door probe usable=true, state0→state1(opening), automatic cleanup.
+  Door consumes RMB before Minecraft places an item; Minecraft blocks/entities
+  still take precedence. Locked-door behavior remains the engine's behavior.
+- Floor activation normalizes LevelResource.ROOT (trailing '.' otherwise defeats
+  private-world check). Shared immutable client snapshots prevent TNT prediction
+  falling through server-only planes. Unknown physical support freezes server
+  ticks; host-offline projectiles freeze too. Source masks only owned collision
+  props while sampling floor/walls and restores solid flags even on error.
+  Runtime old-cube overlap floor probe returned Y89.0244, flags6144 restored.
+- GUI: VClient016 IN_DeactivateMouse alone did not stop recentering. Final code
+  uses VGUI_Surface031 SetCursorAlwaysVisible, UnlockCursor, SetCursor plus
+  one deactivation and focus-aware restoration; no detours or vtable writes.
+  Cursor300,250 stayed unchanged12 samples/2.4s after Source focus settled.
+  Official SDK semantics: ValveSoftware/source-sdk-2013 src/game/client/in_mouse.cpp;
+  L4D2 interface layouts: Lak3/l4d2-internal-base src/SDK/L4D2/Interfaces.
+  Minecraft26.3 mapped InputConstants confirmed SDL left1/right3; corrected
+  mouse click AND drag values, replacing old GLFW0/1. New guest runtime pending.
+- F5: camera only gets rendered yaw; Steve head gets raw Source look; ideal
+  camera lag0; settings and binds restored by launcher. Added initial GUI snapshot
+  on guest connection so an already-open inventory survives bridge reconnect.
+- Forced flushed guest-world save through a temporary, own JDK Attach agent
+  calling public server.saveEverything on server thread; result=true. Backed up
+  whole private world before graceful WM_CLOSE. Restored flushed entity regions
+  to preserve hostile user mobs removed by the old detach hook; new hook only
+  discards tagged stand-ins. Backup location recorded privately in evidence.
+- Java build and native x86 build succeed;27 Python tests pass. New JAR installed.
+  Minecraft closed, normal Legacy launch requested; full new guest physics/input
+  and F5 verification is still required. Do not call this a complete conversion.
+
+2026-10-08 gameplay correction (verification in progress): removed unverified native engine command vtable calls after E crash; Windows Application event confirmed tier0.dll 0xc0000417. Five real guest inventory open/close cycles with safe adapter kept Source process alive. Fixed E physical-key latch to prevent immediate reopen after screen closes; corrected VGUI dc_none=1 from Valve Cursor.h, expires GUI lease even on incomplete pose writes. Added atomic authoritative block region snapshots, periodic reconciliation, nearest512 host collision budget and1400 total edict guard. Added Source actor factions and golem targeting of infected; goal-driven hostile Minecraft mobs target survivors. Source melee scale15 (diamond sword7 ->105 before cooldown). Python32 tests pass, native and Java builds pass; new Java/final cursor runtime verification requires normal guest relaunch.
+
+2026-10-08 user requests cursor/pearls/chorus/map interactions/AI/other maps/loading UI; explicitly forbids launching games. Prepared code without starting games: source pteleport+chorus data events; pearl traces Source surfaces and discards guest pearl on acknowledged hit; Source destination floor+hull ray sampling because retail TraceHull is absent, resets velocity/fall speed. Chorus consume effect requests Source floor search.8-field gameplay header carries held mouse actions; Source m_afButtonForced gets IN_USE and IN_ATTACK only for carry/pour map items, original bits saved/restored; Java nativeuse suppresses duplicate door Toggle. Goal-driven proxy pursuits now move against transient Source collision planes, sidestep collisions; ranged attack and creeper swelling handled separately. Brain-driven hostiles remain a limitation. Loader accepts -Map and reattaches on transitions. New depth capture selects largest full-resolution world-camera pass (D3D9 shader-readable texture only, MSAA/surfaces retain GenericDepth fallback), explicit API20 x86 handle ABI slots10/13 checked by read-only review. Shader gains MC_HOST_DEPTH optional semantic. Loading/cutscene/externalfreeze flags gate Minecraft composition and relay. Cursor handling retains dc_none and pending focus activation; perworld Windows cursor hiding is reversible, no window subclass.34Python tests, Java/native builds and launcher parser pass. Source/Minecraft are closed; new gameplay/depth/cursor slice installed but explicitly NOT runtime-verified.
+
+Final offline verification:35Python tests pass. Added native read-only render-ready status shared channel and launcher/HostInput command deferral during loading, test confirms no process launch while Source unready. Largest depth pass excludes non-screen-size buffers/shader-unreadable surfaces; cursor counter restoration retains outside-app cursor. Five installed files SHA256 match builds. No game launched after user prohibition.

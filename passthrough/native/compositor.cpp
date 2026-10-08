@@ -1,6 +1,8 @@
 #include <cstdio>
 #include <algorithm>
 #include "source_camera.h"
+#include "source_input.h"
+#include "source_depth.h"
 #include "compositor.h"
 #include <windows.h>
 #include <algorithm>
@@ -55,8 +57,12 @@ namespace
 	DWORD g_nextOpenAttempt = 0;
 	ULONGLONG g_lastNewFrame = 0;
 	bool g_guestUiOpen = false;
+    bool g_guestInputAlive=false;
+    bool g_sceneVisible=false;
+    uint32_t g_movementHeld=0;
     uint32_t g_debugMode = 0;
 	int g_cursorShows = 0;
+    bool g_releasedSourceMouse=false;
 
 	struct Layer
 	{
@@ -328,12 +334,22 @@ namespace
 		last = info.ftLastWriteTime;
 	}
 
+    int g_worldCursorHides=0;
+    void restore_world_cursor_counter() {
+        while(g_worldCursorHides>0){ShowCursor(TRUE);--g_worldCursorHides;}
+    }
 	void on_present(effect_runtime *runtime)
 	{
+        source_camera::publish_visibility(source_camera::gameplay_visible());
+        const bool worldCursor=g_active && g_sceneVisible && g_guestInputAlive && !g_guestUiOpen
+            && source_camera::gameplay_visible() && GetForegroundWindow()==runtime->get_hwnd();
+        if(!worldCursor)restore_world_cursor_counter();
 		watch_effect_file(runtime);
-		if (g_guestUiOpen && g_active && GetTickCount64() - g_lastNewFrame < 500 &&
+		if (g_guestUiOpen && g_guestInputAlive && g_sceneVisible && source_camera::gameplay_visible() &&
 			GetForegroundWindow() == runtime->get_hwnd())
 		{
+			source_input::mouse(false);
+            g_releasedSourceMouse=true;
 			runtime->block_input_next_frame();
 			ClipCursor(nullptr);
 			if (g_cursorShows == 0) {
@@ -342,18 +358,35 @@ namespace
 			}
 			SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)));
 		}
-		else while (g_cursorShows > 0) { ShowCursor(FALSE); --g_cursorShows; }
+		else {
+            if(g_releasedSourceMouse) {
+                // Let Source own look input again when closing the guest screen.
+                const bool focus=GetForegroundWindow()==runtime->get_hwnd();
+                source_input::mouse(true,focus);
+                g_releasedSourceMouse=false;
+            }
+            while (g_cursorShows > 0) { ShowCursor(FALSE); --g_cursorShows; }
+            if(g_active && g_sceneVisible && g_guestInputAlive && !g_guestUiOpen && source_camera::gameplay_visible() && GetForegroundWindow()==runtime->get_hwnd()) {
+                source_input::mouse(true,true);
+                SetCursor(nullptr);
+                CURSORINFO cursor{};cursor.cbSize=sizeof(cursor);
+                if(GetCursorInfo(&cursor) && (cursor.flags&CURSOR_SHOWING)) {
+                    int count;
+                    do{count=ShowCursor(FALSE);++g_worldCursorHides;}while(count>=0 && g_worldCursorHides<32);
+                }
+            }
+        }
 	}
 
 	void read_host_pose();
-	void on_begin_effects(effect_runtime *runtime, command_list *, resource_view, resource_view)
+	void on_begin_effects(effect_runtime *runtime, command_list *commands, resource_view, resource_view)
 	{
 		read_host_pose();
 		uint32_t bw = 0, bh = 0;
 		runtime->get_screenshot_width_and_height(&bw, &bh);
 		g_bbWidth = bw;
 		g_bbHeight = bh;
-		bool on = g_active && open_mapping();
+		bool on = g_active && g_sceneVisible && source_camera::gameplay_visible() && open_mapping();
 		if (on)
 			upload(runtime);
 		on = on && g_hasFrame && GetTickCount64() - g_lastNewFrame < 500;
@@ -361,6 +394,8 @@ namespace
 		// Minecraft frame is here. (Toggling techniques from inside this callback crashes ReShade.)
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McActive"); v.handle != 0)
 			runtime->set_uniform_value_bool(v, on);
+        const bool ownDepth=source_depth::finish(runtime,commands);
+        if(const auto v=find_uniform(runtime,kEffect,"UseCapturedHostDepth");v.handle)runtime->set_uniform_value_bool(v,ownDepth);
         if (const auto v=find_uniform(runtime,kEffect,"DebugView");v.handle) runtime->set_uniform_value_int(v,g_debugMode<=3?int(g_debugMode):0);
         if (const auto v=find_uniform(runtime,kEffect,"HostOcclusion");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=4);
         if (const auto v=find_uniform(runtime,kEffect,"Reproject");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=5);
@@ -446,8 +481,10 @@ namespace
 
 	void read_host_pose()
 	{
-        static uint64_t lastAccepted=0;
-        if(GetTickCount64()-lastAccepted>=500) compositor::set_active(false);
+        static uint64_t lastAccepted=0,lastInputAccepted=0;
+        const auto inputNow=GetTickCount64();
+        g_guestInputAlive=lastInputAccepted>0 && inputNow>=lastInputAccepted && inputNow-lastInputAccepted<1000;
+        if(GetTickCount64()-lastAccepted>=500) {compositor::set_active(false);source_depth::enabled=false;}
 		static HANDLE mapping = nullptr;
 		static const uint8_t *view = nullptr;
 		if (!view) {
@@ -458,7 +495,12 @@ namespace
 		const uint32_t seq = read<uint32_t>(view + 4);
 		if ((seq & 1) || read<uint32_t>(view) != 0x50434D4C) return; // Hold the last complete pose across an in-progress write.
 		const uint64_t timestamp = read<uint64_t>(view + 8);
-		g_guestUiOpen = read<uint32_t>(view + 64) != 0;
+		const auto inputStamp=read<uint64_t>(view+72),now=GetTickCount64();
+        lastInputAccepted=inputStamp;
+        g_guestInputAlive=inputStamp>0 && now>=inputStamp && now-inputStamp<1000;
+        g_guestUiOpen = read<uint32_t>(view + 64) != 0;
+        g_movementHeld=read<uint32_t>(view+80)&127;
+        g_sceneVisible=read<uint32_t>(view+84)!=0;
         g_debugMode = read<uint32_t>(view + 68);
 		const double x = read<double>(view+16), y = read<double>(view+24), z = read<double>(view+32);
 		const float yaw = read<float>(view+40), pitch = read<float>(view+44), roll = read<float>(view+48), fov = read<float>(view+52);
@@ -466,6 +508,9 @@ namespace
 		const bool fresh = GetTickCount64() >= timestamp && GetTickCount64() - timestamp < 500;
 		compositor::set_active(fresh);
         if(fresh) lastAccepted=timestamp;
+        source_depth::enabled=fresh && g_sceneVisible;
+        source_depth::eyeX=x;source_depth::eyeY=y;source_depth::eyeZ=z;
+        source_depth::fov=g_hostPoseCount?g_hostPoses[(g_hostPoseCount-1)&3].fov:104.8f;
 		if (fresh) {
             source_camera::Sample actual{};
             static source_camera::Sample lastCamera{};
@@ -498,6 +543,7 @@ namespace
 
 	void on_destroy_effect_runtime(effect_runtime *runtime)
 	{
+		source_depth::destroy(runtime->get_device());
 		destroy_layers(runtime->get_device());
 	}
 }
@@ -514,6 +560,7 @@ namespace compositor
 		reshade::register_event<reshade::addon_event::reshade_present>(on_present);
 		reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(on_reloaded_effects);
 		reshade::register_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
+		source_depth::register_hooks();
 		g_registered = true;
 		reshade::log::message(reshade::log::level::info, "MCPassthrough: registered");
 		return true;
@@ -521,6 +568,9 @@ namespace compositor
 
 	void unregister(void *module)
 	{
+		restore_world_cursor_counter();
+        while(g_cursorShows>0){ShowCursor(FALSE);--g_cursorShows;}
+		source_input::restore();
 		if (g_registered.exchange(false))
 			reshade::unregister_addon(module);
 	}

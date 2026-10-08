@@ -1,5 +1,10 @@
 // Local, listen-server prototype. No movement ownership changes.
+::L4D2MCPreviousGameplay <- null;
 if ("L4D2MCBridge" in getroottable()) {
+    if("gameplay" in L4D2MCBridge) {
+        L4D2MCBridge.RestoreAppearance();
+        L4D2MCPreviousGameplay=L4D2MCBridge.gameplay;
+    }
     if (L4D2MCBridge.anchor != null && L4D2MCBridge.anchor.IsValid())
         L4D2MCBridge.anchor.Kill();
     if ("blocks" in L4D2MCBridge)
@@ -8,15 +13,16 @@ if ("L4D2MCBridge" in getroottable()) {
 }
 PrecacheModel("models/l4d2mc/cube.mdl");
 ::L4D2MCBridge <- { frame = 0, anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
+IncludeScript("l4d2mc_gameplay");
 L4D2MCBridge.ClearCollision <- function() {
     foreach (key, block in blocks) if (block.IsValid()) block.Kill();
     blocks.clear();
 };
 L4D2MCBridge.SyncCollision <- function() {
     local text = FileToString("l4d2mc_collision.txt");
-    if (text == null || text.len() > 8192) return;
+    if (text == null || text.len() > 32768) return;
     local lines = split(text, "\n\r");
-    if (lines.len() < 1 || lines.len() > 129) return;
+    if (lines.len() < 1 || lines.len() > 513) return;
     local header = split(lines[0], " ");
     if (header.len() != 2 || header[1] != Director.GetMapName() || header[0] == collisionSequence) return;
     local wanted = {};
@@ -45,7 +51,11 @@ L4D2MCBridge.SyncCollision <- function() {
     local count = 0, entity = null;
     while ((entity = Entities.Next(entity)) != null) ++count;
     foreach (key, at in wanted) {
-        if (key in blocks || count >= 1700) continue;
+        if (key in blocks) {
+            if(blocks[key].IsValid())continue;
+            delete blocks[key];
+        }
+        if(count >= 1400)continue;
         // Do not enclose a survivor or special infected in a new collision prop.
         local occupied = false;
         entity = null;
@@ -67,7 +77,7 @@ L4D2MCBridge.SyncCollision <- function() {
 L4D2MCBridge.anchor = SpawnEntityFromTable("info_target", { targetname = "l4d2mc_bridge" });
 L4D2MCBridge.anchor.ValidateScriptScope();
 L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
-    if (Time() - L4D2MCBridge.collisionChangedAt > 0.75)
+    if (Time() - L4D2MCBridge.collisionChangedAt > 3.0)
         L4D2MCBridge.ClearCollision();
     local player = null;
     local entity = null;
@@ -76,7 +86,8 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
             player = entity; break;
         }
     }
-    if (player == null) return 0.033;
+    if (player == null) {L4D2MCBridge.RestoreAppearance();return 0.033;}
+    if(!L4D2MCBridge.ReadGameplay(player))L4D2MCBridge.RestoreAppearance();
     local p = player.EyePosition();
     local feet = player.GetOrigin();
     local a = player.EyeAngles();
@@ -116,9 +127,24 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
             }
         }
     }
+    local visible=true;
+    if(NetProps.HasProp(player,"m_hViewEntity")) {
+        local view=NetProps.GetPropEntity(player,"m_hViewEntity");
+        if(view!=null && view!=player)visible=false;
+    }
+    if((NetProps.GetPropInt(player,"m_fFlags")&32)!=0) {
+        local id=player.GetEntityIndex();
+        local own=id in L4D2MCBridge.gameplay.frozen && L4D2MCBridge.gameplay.frozen[id].entity==player && !L4D2MCBridge.gameplay.frozen[id].old;
+        if(!own)visible=false;
+    }
     L4D2MCBridge.frame++;
     local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"hit\":%s,\"normal\":%s,\"buttons\":%d}",
         L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,surface,normal,player.GetButtonMask());
+    data=data.slice(0,data.len()-1)+",\"visible\":"+(visible?"true":"false")+",\"nativeuse\":"+(NetProps.HasProp(player,"m_afButtonForced")?"true":"false")+",\"usable\":"+(L4D2MCBridge.Usable(player)?"true":"false")+",\"actors\":"+L4D2MCBridge.ActorJson(player)+",\"wheel\":"+L4D2MCBridge.gameplay.wheel+",\"replies\":[";
+    local replyCount=0;foreach(id,reply in L4D2MCBridge.gameplay.replies)data+=(replyCount++==0?"":",")+reply;
+    data+= "],\"physground\":[";
+    for(local i=0;i<L4D2MCBridge.gameplay.ground.len();i++)data+=(i==0?"":",")+L4D2MCBridge.gameplay.ground[i];
+    data+="]}";
     StringToFile("l4d2mc_pose.txt", data);
     if (Time() >= L4D2MCBridge.collisionAt) {
         L4D2MCBridge.collisionAt = Time() + 0.25;

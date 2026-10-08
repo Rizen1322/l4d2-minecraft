@@ -57,6 +57,7 @@ public final class MobWar {
 	// server thread only
 	private static final Map<Integer, Villager> proxies = new HashMap<>();
 	private static final Map<Integer, Integer> handleOf = new HashMap<>();
+    private static final Map<Integer, Integer> factionOf = new HashMap<>();
 	private static final Map<Integer, Integer> missingTicks = new HashMap<>();
 	private static boolean reportedMobs;
 
@@ -71,13 +72,23 @@ public final class MobWar {
 	 * permanent hidden invisibility effect keeps that flag set: Minecraft resets it on sync otherwise).
 	 */
 	public static boolean isProxy(final Entity e) {
-		return e instanceof Villager && (e.isInvisible() || e.entityTags().contains(PROXY_TAG));
+		return e instanceof Villager && (e.entityTags().contains(PROXY_TAG) || e.level().isClientSide() && e.isInvisible());
 	}
 
 	/** Mobs that join the fight: hostile, goal-driven ones. */
 	private static boolean fighter(final Entity e) {
-		return e instanceof Mob && e instanceof Enemy && !isProxy(e) && !BRAIN_MOBS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath());
+		String kind=BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath();
+        return e instanceof Mob && !isProxy(e) && ((e instanceof Enemy && !BRAIN_MOBS.contains(kind)) || kind.equals("iron_golem") || kind.equals("snow_golem"));
 	}
+
+    public static boolean targetFor(final Mob mob, final LivingEntity target) {
+        if(!isProxy(target))return false;
+        Integer faction=factionOf.get(target.getId());
+        if(faction==null)return false;
+        String kind=BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath();
+        boolean protector=kind.equals("iron_golem") || kind.equals("snow_golem");
+        return faction==(protector?1:0);
+    }
 
 	public static void peds(final double[] flat) {
 		peds.set(flat);
@@ -103,6 +114,7 @@ public final class MobWar {
 		GoalSelector targets = ((MobAccessor) mob).passthrough$targetSelector();
 		if (targets.getAvailableGoals().stream().noneMatch(w -> w.getGoal() instanceof ProxyTargetGoal)) {
 			targets.addGoal(2, new ProxyTargetGoal(mob));
+            ((MobAccessor)mob).passthrough$goalSelector().addGoal(0,new SourcePursuitGoal(mob));
 		}
 
 		AttributeInstance range = mob.getAttribute(Attributes.FOLLOW_RANGE);
@@ -124,9 +136,10 @@ public final class MobWar {
 			return;
 		}
 
+		if(attacker instanceof Mob mob && !targetFor(mob,proxy))return;
 		String kind = BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).getPath();
-		Passthrough.events.accept(String.format(Locale.ROOT, "{\"t\":\"mobhit\",\"h\":%d,\"d\":%.2f,\"from\":[%.3f,%.3f,%.3f],\"k\":\"%s\"}",
-			handle, amount, attacker.getX(), attacker.getY(), attacker.getZ(), kind));
+		Passthrough.events.accept(String.format(Locale.ROOT, "{\"t\":\"mobhit\",\"h\":%d,\"d\":%.2f,\"from\":[%.3f,%.3f,%.3f],\"k\":\"%s\",\"id\":%d}",
+			handle, amount, attacker.getX(), attacker.getY(), attacker.getZ(), kind,attacker.getId()));
 	}
 
 	/** Every server tick (server thread). */
@@ -151,7 +164,7 @@ public final class MobWar {
 		}
 
 		Map<Integer, Boolean> seen = new HashMap<>();
-		for (int i = 0; i + 3 < p.length; i += 4) {
+		for (int i = 0; i + 4 < p.length; i += 5) {
 			int handle = (int) p[i];
 			double x = p[i + 1], y = p[i + 2], z = p[i + 3];
 			seen.put(handle, true);
@@ -180,6 +193,7 @@ public final class MobWar {
 				v.setPos(x, y, z);
 			}
 
+            factionOf.put(v.getId(),(int)p[i+4]);
 			missingTicks.remove(handle);
 		}
 
@@ -193,6 +207,7 @@ public final class MobWar {
 			int missing = missingTicks.merge(e.getKey(), 1, Integer::sum);
 			if (missing > 6 || e.getValue().isRemoved()) {
 				handleOf.remove(e.getValue().getId());
+                factionOf.remove(e.getValue().getId());
 				e.getValue().discard();
 				missingTicks.remove(e.getKey());
 				it.remove();
@@ -340,14 +355,16 @@ public final class MobWar {
 		proxies.values().forEach(Entity::discard);
 		proxies.clear();
 		handleOf.clear();
+        factionOf.clear();
 		missingTicks.clear();
 	}
 
 	static void detach(final MinecraftServer s) {
-		// the world is saved next: none of the fight is kept in it
-		discardFighters(s.overworld());
+		// Only Source stand-ins are transient; keep user-spawned Minecraft mobs.
+		clearProxies(); // User-spawned mobs remain in the private Minecraft save.
 		proxies.clear();
 		handleOf.clear();
+        factionOf.clear();
 		missingTicks.clear();
 		peds.set(null);
 		damage.clear();

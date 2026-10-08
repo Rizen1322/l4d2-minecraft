@@ -2,10 +2,79 @@ import math
 import unittest
 import tempfile
 from pathlib import Path
-from bridge import CollisionSnapshot, camera, position, surface, render_camera
+from unittest.mock import patch
+from bridge import CollisionSnapshot, camera, position, surface, render_camera, relay_keys,HostInput,SourceSnapshot,parse_movement_bindings,movement_mask
+
+
+class SessionTests(unittest.TestCase):
+    def test_partial_source_write_keeps_last_valid_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file=Path(directory)/'pose'
+            sample={"v":1,"f":1,"map":"c1m1_hotel","p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90}
+            import json
+            file.write_text(json.dumps(sample));reader=SourceSnapshot(file)
+            with patch('bridge.time.monotonic',return_value=10):self.assertEqual(reader.read(),sample)
+            file.write_text('{')
+            with patch('bridge.time.monotonic',return_value=10.1):self.assertEqual(reader.read(),sample)
+            with patch('bridge.time.monotonic',return_value=11.2):self.assertIsNone(reader.read())
+    def test_gui_close_movement_uses_actual_source_binds(self):
+        bindings=parse_movement_bindings('bind "w" "+forward; r_cleardecals"\nbind "CTRL" "+duck"\nbind "SHIFT" "+speed"\nbind "e" "+use"')
+        self.assertEqual(movement_mask({0x57,0x11},bindings),1|32)
+        self.assertEqual(movement_mask({0x45},bindings),0)
+
+class InputTests(unittest.TestCase):
+    def test_inventory_close_does_not_reopen_while_e_still_held(self):
+        state={}
+        relay_keys({0x45},state,focused=True,gui=False)
+        relay_keys(set(),state,focused=True,gui=True)
+        self.assertEqual(relay_keys({0x45},state,focused=True,gui=True),[])
+        self.assertEqual(relay_keys({0x45},state,focused=True,gui=False),[])
+        relay_keys(set(),state,focused=True,gui=False)
+        self.assertIn({'t':'key','k':'inventory','down':True},relay_keys({0x45},state,focused=True,gui=False))
+
+    def test_source_walk_and_jump_keys_are_not_replaced(self):
+        self.assertEqual(relay_keys({0x10,0x11,0x57,0x20},{},focused=True,gui=False),[])
+
+    def test_cleanup_never_relaunches_absent_source(self):
+        host=HostInput(Path('absent-source'))
+        with patch.object(host,'_window',return_value=None),patch('bridge.subprocess.Popen') as launch:
+            self.assertFalse(host._send(['+cl_mouseenable','1']))
+            launch.assert_not_called()
+    def test_commands_wait_until_source_finished_loading(self):
+        host=HostInput(Path('absent-source'))
+        with patch.object(host,'_window',return_value=123),patch.object(host,'_engine_ready',return_value=False),patch('bridge.subprocess.Popen') as launch:
+            self.assertFalse(host._send(['+exec','test']))
+            launch.assert_not_called()
+
+    def test_minecraft_buttons_and_hotbar(self):
+        state = {}
+        messages = relay_keys({1,2,0x45,0x33}, state, focused=True, gui=False)
+        self.assertIn({'t':'key','k':'attack','down':True},messages)
+        self.assertIn({'t':'key','k':'use','down':True},messages)
+        self.assertIn({'t':'key','k':'inventory','down':True},messages)
+        self.assertIn({'t':'slot','n':2},messages)
+        self.assertEqual(relay_keys({1,2,0x45,0x33},state,focused=True,gui=False), [])
+
+    def test_open_gui_or_lost_focus_releases_world_buttons(self):
+        state = {}
+        relay_keys({1,2},state,focused=True,gui=False)
+        released=relay_keys({1,2},state,focused=True,gui=True)
+        self.assertIn({'t':'key','k':'attack','down':False},released)
+        self.assertIn({'t':'key','k':'use','down':False},released)
+        relay_keys({1},state,focused=True,gui=False)
+        self.assertIn({'t':'key','k':'attack','down':False},relay_keys({1},state,focused=False,gui=False))
 
 
 class CameraTests(unittest.TestCase):
+    def test_cutscene_visibility_survives_camera_conversion(self):
+        sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"visible":False}
+        self.assertFalse(camera(sample,16/9)['visible'])
+
+    def test_source_crouch_and_door_state_survive_camera_conversion(self):
+        sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"buttons":4,"usable":True}
+        pose=camera(sample,16/9)
+        self.assertTrue(pose['sneak']);self.assertTrue(pose['usable'])
+
     def test_render_view_outlier_never_teleports_guest_camera(self):
         pose = {'p':[20.088867,90.961929,-181.631287], 'r':[23.2474,14.50185,0], 'fov':73.7398}
         good = dict(pose, fov=104.8218, render_sequence=100)
@@ -76,13 +145,23 @@ class CollisionTests(unittest.TestCase):
     def test_changes_remove_cells_and_snapshot_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
             snapshot = CollisionSnapshot(Path(directory) / 'collision.txt')
-            snapshot.apply({'t':'blocks','set':[v for x in range(200) for v in [x,90,-176]]})
+            snapshot.apply({'t':'blocks','set':[v for x in range(600) for v in [x,90,-176]]})
             snapshot.apply({'t':'blocks','clear':[0,90,-176]})
             snapshot.publish('c1m1_hotel', [0,90,-176])
             lines = snapshot.path.read_text().splitlines()
-            self.assertEqual(len(lines),129)
+            self.assertEqual(len(lines),513)
             self.assertEqual(lines[1], '1 90 -176')
             self.assertNotIn('0 90 -176',lines[1:])
+
+    def test_authoritative_region_removes_missing_blocks_but_keeps_outside(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot=CollisionSnapshot(Path(directory)/'collision.txt')
+            snapshot.apply({'t':'blocks','set':[1,90,1,2,90,1,100,90,1]})
+            snapshot.apply({'t':'blocks','bounds':[0,0,0,10,100,10],'set':[2,90,1]})
+            self.assertEqual(snapshot.cells,{(2,90,1),(100,90,1)})
+            with self.assertRaises(ValueError):
+                snapshot.apply({'t':'blocks','bounds':[0,0,0,10,100,10],'set':['bad',0,0]})
+            self.assertEqual(snapshot.cells,{(2,90,1),(100,90,1)})
 
     def test_map_change_removes_old_collisions(self):
         with tempfile.TemporaryDirectory() as directory:

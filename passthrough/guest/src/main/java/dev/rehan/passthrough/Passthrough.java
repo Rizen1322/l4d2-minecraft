@@ -19,11 +19,13 @@ public class Passthrough implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ServerLifecycleEvents.SERVER_STARTED.register(WorldBridge::attach);
+        ServerLifecycleEvents.SERVER_STARTED.register(HostTerrain::attach);
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
-			// before the world is saved: the Nether goes back and the fight's mobs go, so none of it is kept
+			// Remove our transient proxies before saving; retain user mobs and builds.
 			Nether.detach(server);
 			MobWar.detach(server);
 			WorldBridge.detach();
+            HostTerrain.detach();
 		});
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register((level,chunk,newChunk) -> WorldBridge.cleanLegacySupports(level,chunk));
 		ServerEntityEvents.ENTITY_LOAD.register(MobWar::onEntityLoad);

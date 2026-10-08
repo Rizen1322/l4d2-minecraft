@@ -13,9 +13,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /** Minecraft moving the player (ender pearls, /tp) moves the host's player too; otherwise the host would pull it back. */
 @Mixin(ServerPlayer.class)
 abstract class ServerPlayerMixin {
-	@Inject(method = "teleport(Lnet/minecraft/world/level/portal/TeleportTransition;)Lnet/minecraft/server/level/ServerPlayer;", at = @At("HEAD"))
+	@Inject(method = "teleport(Lnet/minecraft/world/level/portal/TeleportTransition;)Lnet/minecraft/server/level/ServerPlayer;", at = @At("RETURN"))
 	private void passthrough$teleported(final TeleportTransition transition, final CallbackInfoReturnable<ServerPlayer> cir) {
-		if (Passthrough.active) {
+		if (Passthrough.active && cir.getReturnValue()!=null) {
 			Vec3 p = transition.position();
 			Passthrough.events.accept(String.format(Locale.ROOT, "{\"t\":\"pteleport\",\"pos\":[%.3f,%.3f,%.3f]}", p.x, p.y, p.z));
 		}

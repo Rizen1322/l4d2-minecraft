@@ -5,6 +5,9 @@
 // overlay: Minecraft's hand, HUD and screens, always on top.
 #include "ReShade.fxh"
 
+texture MCHostDepthTex : MC_HOST_DEPTH;
+sampler sHostDepth { Texture=MCHostDepthTex; MinFilter=POINT; MagFilter=POINT; AddressU=CLAMP; AddressV=CLAMP; };
+uniform bool UseCapturedHostDepth=false;
 texture MCWorldTex : MCWORLD;
 texture MCDepthTex : MCDEPTH;
 texture MCOverlayTex : MCOVERLAY;
@@ -188,7 +191,7 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 	// Where this L4D2 pixel's view ray lands in Minecraft's frame.
 	float2 muv = ouv;
 	bool inside = true;
-	const float zh = HostOcclusion ? host_linear(tex2Dlod(ReShade::DepthBuffer, float4(uv, 0, 0)).x) : 400.0;
+	const float zh = HostOcclusion ? host_linear(UseCapturedHostDepth ? tex2Dlod(sHostDepth,float4(uv,0,0)).x : tex2Dlod(ReShade::DepthBuffer, float4(uv, 0, 0)).x) : 400.0;
 	// how far behind L4D2's surface Minecraft may still show: more where that surface is seen at a grazing angle
 	const float allow = min(DepthBias + SlopeBias * abs(ddy(zh)), max(MaxBias, DepthBias));
 	float zm = 1e9;

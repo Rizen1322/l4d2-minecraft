@@ -1,7 +1,23 @@
 {
-	"required": true,
-	"package": "dev.rehan.passthrough.mixin",
-	"compatibilityLevel": "JAVA_25",
-	"mixins": ["LevelMixin", "MobAccessor", "MobMixin", "PlayerMixin", "PortalMixin", "ProjectileMixin", "ProxyMixin", "ServerExplosionMixin", "ServerPlayerMixin"],
-	"injectors": { "defaultRequire": 1 }
+  "required": true,
+  "package": "dev.rehan.passthrough.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "FoodHealMixin",
+    "ChorusTeleportMixin",
+    "HostCollisionMixin",
+    "HostEntityTickMixin",
+    "LevelMixin",
+    "MobAccessor",
+    "MobMixin",
+    "PlayerMixin",
+    "PortalMixin",
+    "ProjectileMixin",
+    "ProxyMixin",
+    "ServerExplosionMixin",
+    "ServerPlayerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

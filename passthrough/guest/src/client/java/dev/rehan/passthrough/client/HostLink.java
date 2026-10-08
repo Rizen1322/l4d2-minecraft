@@ -7,6 +7,7 @@ import dev.rehan.passthrough.MobWar;
 import dev.rehan.passthrough.Nether;
 import dev.rehan.passthrough.Passthrough;
 import dev.rehan.passthrough.WorldBridge;
+import dev.rehan.passthrough.HostTerrain;
 import java.net.InetSocketAddress;
 import java.util.Locale;
 import net.minecraft.client.Minecraft;
@@ -55,6 +56,10 @@ public final class HostLink extends WebSocketServer {
 	public void onOpen(final WebSocket conn, final ClientHandshake handshake) {
 		Passthrough.LOG.info("host connected from {}", conn.getRemoteSocketAddress());
 		conn.send(String.format(Locale.ROOT, "{\"t\":\"hello\",\"v\":1,\"shm\":\"%s\",\"pid\":%d}", FrameExporter.NAME.replace("\\", "\\\\"), ProcessHandle.current().pid()));
+        Minecraft minecraft=Minecraft.getInstance();
+        minecraft.execute(()->{if(conn.isOpen())try {
+            conn.send("{\"t\":\"ui\",\"open\":"+(minecraft.player!=null && minecraft.gui.screen()!=null)+"}");
+        } catch(org.java_websocket.exceptions.WebsocketNotConnectedException ignored) {}});
 	}
 
 	@Override
@@ -81,6 +86,7 @@ public final class HostLink extends WebSocketServer {
 				}
 				case "cam" -> HostState.update(m);
 				case "surface" -> HostState.surface(m);
+                case "physground" -> HostTerrain.update(m.getAsJsonArray("p"));
                 case "ground" -> {} // Retired: Source supports are virtual, never world blocks.
 				case "clear" -> WorldBridge.clearSolid();
 				case "cmd" -> WorldBridge.command(m.get("c").getAsString());
@@ -93,11 +99,11 @@ public final class HostLink extends WebSocketServer {
 				}
 				case "peds" -> {
 					JsonArray list = m.getAsJsonArray("p");
-					double[] flat = new double[list.size() * 4];
+					double[] flat = new double[list.size() * 5];
 					for (int i = 0; i < list.size(); i++) {
 						JsonArray e = list.get(i).getAsJsonArray();
-						for (int k = 0; k < 4; k++) {
-							flat[i * 4 + k] = e.get(k).getAsDouble();
+						for (int k = 0; k < 5; k++) {
+							flat[i * 5 + k] = k<e.size()?e.get(k).getAsDouble():0;
 						}
 					}
 

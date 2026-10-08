@@ -53,11 +53,14 @@ public final class PlayerSync {
 			return;
 		}
 
-		player.setYRot(p.yaw());
-		player.setXRot(p.pitch());
-		player.yRotO = p.yaw();
-		player.xRotO = p.pitch();
-		player.yHeadRot = player.yHeadRotO = p.yaw();
+        minecraft.options.keyShift.setDown(HostState.isCrouching());
+        float headYaw=p.firstPerson()?p.yaw():p.lookYaw();
+        float headPitch=p.firstPerson()?p.pitch():p.lookPitch();
+		player.setYRot(headYaw);
+		player.setXRot(headPitch);
+		player.yRotO = headYaw;
+		player.xRotO = headPitch;
+		player.yHeadRot = player.yHeadRotO = headYaw;
 		player.yBodyRot = player.yBodyRotO = p.firstPerson() ? p.yaw() : p.bodyYaw();
 		// the model stands exactly where the host's player is this frame (not a tick behind, interpolating)
 		double x = p.firstPerson() ? p.x() : p.px();

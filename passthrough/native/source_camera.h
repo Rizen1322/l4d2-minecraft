@@ -14,6 +14,20 @@ inline bool readable(const void* p, size_t bytes) {
     if (!p || !VirtualQuery(p,&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_NOACCESS|PAGE_GUARD))) return false;
     return reinterpret_cast<uintptr_t>(p)+bytes<=reinterpret_cast<uintptr_t>(m.BaseAddress)+m.RegionSize;
 }
+// Read-only methods before the validated matrix slots in this exact interface.
+inline bool gameplay_visible() {
+    static void* engine=nullptr;
+    if(!engine) {
+        auto module=GetModuleHandleW(L"engine.dll");
+        auto factory=module?reinterpret_cast<void*(__cdecl*)(const char*,int*)>(GetProcAddress(module,"CreateInterface")):nullptr;
+        engine=factory?factory("VEngineClient013",nullptr):nullptr;
+    }
+    if(!readable(engine,sizeof(void*)))return false;
+    auto table=*reinterpret_cast<void***>(engine);
+    if(!readable(table,29*sizeof(void*)))return false;
+    using Flag=bool(__thiscall*)(void*);
+    return reinterpret_cast<Flag>(table[26])(engine) && !reinterpret_cast<Flag>(table[28])(engine);
+}
 inline bool read(Sample& s) {
     static void* engine=nullptr;
     if (!engine) {
@@ -58,6 +72,13 @@ inline bool read(Sample& s) {
     if (!std::isfinite(s.fov)||!std::isfinite(s.nearPlane)||!std::isfinite(s.farPlane) ||
         !(s.nearPlane>0&&s.nearPlane<100&&s.farPlane>s.nearPlane)) return false;
     return true;
+}
+inline void publish_visibility(bool ready) {
+    static HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,128,L"Local\\L4D2MinecraftRenderPose");
+    static uint8_t* data=map?static_cast<uint8_t*>(MapViewOfFile(map,FILE_MAP_WRITE,0,0,128)):nullptr;
+    if(!data)return;
+    uint32_t flag=ready?1:0;uint64_t stamp=GetTickCount64();
+    std::memcpy(data+64,&flag,sizeof(flag));MemoryBarrier();std::memcpy(data+72,&stamp,sizeof(stamp));
 }
 inline void publish(const Sample& s) {
     static HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,128,L"Local\\L4D2MinecraftRenderPose");

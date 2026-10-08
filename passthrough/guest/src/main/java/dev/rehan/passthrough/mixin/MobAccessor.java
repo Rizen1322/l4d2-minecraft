@@ -9,4 +9,6 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 public interface MobAccessor {
 	@Accessor("targetSelector")
 	GoalSelector passthrough$targetSelector();
+    @Accessor("goalSelector")
+    GoalSelector passthrough$goalSelector();
 }

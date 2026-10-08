@@ -14,6 +14,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.FireworkRocketEntity;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl;
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -174,6 +175,7 @@ public final class WorldBridge {
 		}
 
 		MobWar.tick(s);
+        HostTerrain.tick(s);
 		Nether.tick(s);
 	}
 
@@ -191,7 +193,9 @@ public final class WorldBridge {
 
 			if (e instanceof AbstractArrow arrow && !arrow.entityTags().contains(HIT_TAG) && arrow.getDeltaMovement().lengthSqr() > 1.0E-4) {
 				kind = "arrow";
-			} else if (e instanceof FireworkRocketEntity rocket && rocket.isShotAtAngle()) {
+			} else if (e instanceof ThrownEnderpearl) {
+                kind="ender_pearl";
+            } else if (e instanceof FireworkRocketEntity rocket && rocket.isShotAtAngle()) {
 				kind = "firework"; // not the ones boosting an elytra flight
 			}
 
@@ -219,7 +223,10 @@ public final class WorldBridge {
 		s.execute(() -> {
 			ServerLevel level = s.overworld();
 			Entity e = level.getEntity(id);
-			if (e instanceof FireworkRocketEntity) {
+			if (e instanceof ThrownEnderpearl) {
+                // Source already validated and moved the real survivor.
+                e.discard();
+            } else if (e instanceof FireworkRocketEntity) {
 				e.setPos(x, y, z);
 				level.broadcastEntityEvent(e, (byte) 17);
 				e.discard();
@@ -291,25 +298,26 @@ public final class WorldBridge {
 
 			BlockPos c = player.blockPosition();
 			BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
-			int found = 0;
-			for (int x = -radius; x <= radius && found < 3000; x++) {
-				for (int z = -radius; z <= radius && found < 3000; z++) {
-					for (int y = -24; y <= 40; y++) {
-						p.set(c.getX() + x, c.getY() + y, c.getZ() + z);
-						if (!level.isInWorldBounds(p) || !level.isLoaded(p)) {
-							continue;
-						}
+            // One complete region replaces the host cache atomically, including AIR.
+            // Never truncate it silently: an omitted solid would lose its collision.
+            StringBuilder cells=new StringBuilder();
+            int found=0;
+            int x0=Math.max(-1023,c.getX()-radius),x1=Math.min(1023,c.getX()+radius);
+            int z0=Math.max(-1023,c.getZ()-radius),z1=Math.min(1023,c.getZ()+radius);
+            int y0=Math.max(-1023,c.getY()-24),y1=Math.min(1023,c.getY()+40);
+            for(int x=x0;x<=x1;x++) for(int z=z0;z<=z1;z++) for(int y=y0;y<=y1;y++) {
+                p.set(x,y,z);
+                // Loaded chunks only; do not interpret an unavailable chunk as AIR.
+                if(!level.isInWorldBounds(p))continue;
+                if(!level.isLoaded(p))return;
+                if(solidForHost(level,p,level.getBlockState(p))) {
+                    if(++found>10000)return;
+                    cells.append(cells.isEmpty()?"":",").append(x).append(',').append(y).append(',').append(z);
+                }
+            }
+            flush(s);
+            Passthrough.events.accept("{\"t\":\"blocks\",\"bounds\":["+x0+","+y0+","+z0+","+x1+","+y1+","+z1+"],\"set\":["+cells+"]}");
 
-						BlockState state = level.getBlockState(p);
-						if (solidForHost(level, p, state)) {
-							changes.put(p.immutable(), true);
-							found++;
-						}
-					}
-				}
-			}
-
-			flush(s);
 			Passthrough.events.accept("{\"t\":\"syncdone\",\"id\":" + request + ",\"count\":" + found + "}");
 		});
 	}
