@@ -49,12 +49,14 @@ public final class GolemOrders extends Goal {
     @Override public void start(){mob.getNavigation().stop();}
     @Override public void tick(){
         Vec3 p=destination();if(p==null)return;
-        double dx=p.x-mob.getX(),dz=p.z-mob.getZ(),d=Math.hypot(dx,dz);if(d<.01)return;
+        Vec3 waypoint=HostNavigation.next(mob,p);if(waypoint==null)return;
+        double dx=waypoint.x-mob.getX(),dz=waypoint.z-mob.getZ(),d=Math.hypot(dx,dz);if(d<.01)return;
         double step=Math.min(d,Math.clamp(mob.getAttributeValue(Attributes.MOVEMENT_SPEED),.08,.3));
         double mx=dx/d*step,mz=dz/d*step;
-        if(avoid>0){avoid--;double old=mx;mx=-mz*side;mz=old*side;}
         mob.setYRot((float)(Math.toDegrees(Math.atan2(mz,mx))-90));mob.yBodyRot=mob.getYRot();
+        if(mob.onGround() && HostTerrain.lowLedge(mob,mx,mz))mob.getJumpControl().jump();
         mob.move(MoverType.SELF,new Vec3(mx,0,mz));
-        if(mob.horizontalCollision){avoid=12;side=-side;}
+        if(mob.horizontalCollision && ++avoid>=20){HostNavigation.stuck(mob);avoid=0;}
+        else if(!mob.horizontalCollision)avoid=0;
     }
 }

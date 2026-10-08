@@ -5,6 +5,22 @@ from combat import GameplayMailbox,source_position
 
 
 class CombatTests(unittest.TestCase):
+    def test_ignition_is_bounded_data_and_never_replayed_across_maps(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'ignite','pos':[2,90,-175]});box.publish('c1m1_hotel')
+            self.assertIn('ignite 64 5600 2880',box.path.read_text())
+            for bad in [[True,0,0],[1024,0,0],[float('inf'),0,0]]:
+                with self.assertRaises(ValueError):box.apply({'t':'ignite','pos':bad})
+            box.publish('c1m2_streets');self.assertNotIn('ignite',box.path.read_text())
+
+    def test_sword_tier_and_tongue_cut_are_validated(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            box.apply({'t':'melee','d':7,'r':3,'cut':True,'tier':1});box.publish('c1m1_hotel')
+            self.assertIn('melee 105.0 96.0 1 1',box.path.read_text())
+            for tier in [True,3,-1,'2']:
+                with self.assertRaises(ValueError):box.apply({'t':'melee','tier':tier})
     def test_damage_units_and_axes(self):
         self.assertEqual(source_position([2,90,-175]),(64,5600,2880))
         with tempfile.TemporaryDirectory() as d:
@@ -112,3 +128,15 @@ class CombatTests(unittest.TestCase):
             self.assertIn('projectile 1 arrow 64 5600 2880 135.0',box.path.read_text())
             self.assertIn('projectile 2 arrow 64 5600 2880 60.0',box.path.read_text())
             with self.assertRaises(ValueError):box.apply({'t':'proj','p':[[1,'arrow',0,0,0,float('nan')]]})
+
+    def test_navigation_request_is_data_only_and_expires(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'effects')
+            with patch('combat.time.monotonic',return_value=10):
+                box.apply({'t':'nav','id':7,'q':9,'from':[2,90,-175],'goal':[2,85,-174],'w':1.4,'h':2.7})
+                box.publish('c1m1_hotel')
+            self.assertIn('nav 7 9 64 5600 2880 64 5568 2720 44.8 86.4',box.path.read_text())
+            with patch('combat.time.monotonic',return_value=12):box.publish('c1m1_hotel')
+            self.assertNotIn('nav 7',box.path.read_text())
+            with self.assertRaises(ValueError):box.apply({'t':'nav','id':True,'q':1,'from':[0,0,0],'goal':[0,0,0],'w':1,'h':2})

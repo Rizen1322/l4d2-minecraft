@@ -79,7 +79,8 @@ final class ClientInput {
 					if (k.equals("escape")) {
 					if (down && player != null) {
                         if(minecraft.gui.screen()!=null)minecraft.gui.screen().onClose();
-                        else minecraft.gui.setPauseScreen(false,false);
+                        // Escape belongs to Source; never open a second pause menu.
+                        releaseRelay(minecraft);
 					}
 
 					return;
@@ -106,9 +107,20 @@ final class ClientInput {
 				if (k.equals("attack") && down && player != null && !(minecraft.hitResult instanceof EntityHitResult)) {
                     double strength=player.getAttackStrengthScale(0.5F);
                     double damage=player.getAttributeValue(Attributes.ATTACK_DAMAGE)*(0.2+strength*strength*0.8);
-                    Passthrough.events.accept(String.format(Locale.ROOT,"{\"t\":\"melee\",\"d\":%.3f,\"r\":3.0}",damage));
+                    Passthrough.events.accept(String.format(Locale.ROOT,"{\"t\":\"melee\",\"d\":%.3f,\"r\":3.0,\"cut\":%b,\"tier\":%d}",damage,player.getMainHandItem().is(net.minecraft.tags.ItemTags.SWORDS),player.getMainHandItem().is(net.minecraft.world.item.Items.NETHERITE_SWORD)?2:player.getMainHandItem().is(net.minecraft.world.item.Items.DIAMOND_SWORD)?1:0));
                     player.resetAttackStrengthTicker();
 				}
+                if(k.equals("use") && down && player!=null && minecraft.gui.screen()==null
+                        && (player.getMainHandItem().is(net.minecraft.world.item.Items.FLINT_AND_STEEL)
+                            || player.getOffhandItem().is(net.minecraft.world.item.Items.FLINT_AND_STEEL))) {
+                    var ground=HostState.surface();
+                    boolean guestHit=minecraft.hitResult instanceof EntityHitResult
+                        || (minecraft.hitResult instanceof BlockHitResult hit && !player.level().getBlockState(hit.getBlockPos()).isAir());
+                    if(!guestHit && ground!=null && ground.face()==net.minecraft.core.Direction.UP && player.getEyePosition().distanceToSqr(ground.pos())<=25) {
+                        dev.rehan.passthrough.SurvivalFeatures.igniteSurface(ground.pos().x,ground.pos().y,ground.pos().z);
+                        return;
+                    }
+                }
                 if(k.equals("use") && down && player!=null && HostState.canUse()
                         && !(minecraft.hitResult instanceof EntityHitResult)
                         && !(minecraft.hitResult instanceof BlockHitResult hit && !player.level().getBlockState(hit.getBlockPos()).isAir())) {

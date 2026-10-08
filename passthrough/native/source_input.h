@@ -50,5 +50,15 @@ inline bool mouse(bool active,bool focus=true) {
     }
     return true;
 }
+inline void yield_to_menu() {
+    // Clear only our override. VGUI chooses the menu cursor and mouse capture.
+    // Reactivate client input once gameplay resumes, never during the menu.
+    if(surface && source_camera::readable(surface,sizeof(void*))) {
+        auto st=*reinterpret_cast<void***>(surface);
+        if(source_camera::readable(st,50*sizeof(void*)))
+            reinterpret_cast<void(__thiscall*)(void*,bool)>(st[49])(surface,false);
+    }
+    pendingActivation=true;
+}
 inline void restore(){if(released)mouse(true,false);}
 }

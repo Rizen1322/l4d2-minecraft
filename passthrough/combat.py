@@ -16,7 +16,7 @@ class GameplayMailbox:
     def __init__(self,path):
         self.path=path;self.generation=uuid.uuid4().hex[:12]
         self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
-        self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0
+        self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={}
 
     def apply(self,message):
         kind=message.get('t')
@@ -28,9 +28,22 @@ class GameplayMailbox:
         elif kind=='melee':
             d=float(message.get('d',1));r=float(message.get('r',3))
             if not math.isfinite(d+r) or not 0<=d<=100 or not 0<r<=8:raise ValueError('invalid melee')
-            event=('melee',d*15,r*32)
+            cut=message.get('cut',False)
+            if type(cut) is not bool:raise ValueError('invalid blade flag')
+            tier=message.get('tier',0)
+            if type(tier) is not int or not 0<=tier<=2:raise ValueError('invalid sword tier')
+            event=('melee',d*15,r*32,int(cut),tier)
         elif kind=='pteleport':event=('teleport',*source_position(message['pos']))
         elif kind=='chorus':event=('chorus',)
+        elif kind=='ignite':event=('ignite',*source_position(message['pos']))
+        elif kind=='nav':
+            ident=message.get('id');query=message.get('q');w=message.get('w');h=message.get('h')
+            if type(ident) is not int or type(query) is not int or not 0<ident<2**31 or not 0<query<2**31:raise ValueError('invalid navigation identity')
+            if type(w) not in (int,float) or type(h) not in (int,float) or not math.isfinite(w+h) or not 0<w<=16 or not 0<h<=16:raise ValueError('invalid navigation body')
+            row=(ident,query,*source_position(message['from']),*source_position(message['goal']),w*32,h*32)
+            if ident not in self.navigation and len(self.navigation)>=12:
+                del self.navigation[min(self.navigation,key=lambda k:self.navigation[k][1])]
+            self.navigation[ident]=(row,time.monotonic())
         elif kind in ('link','signals'):
             rows=[[*message['pos'],False]] if kind=='link' else message['s']
             if len(rows)>32:raise ValueError('too many redstone links')
@@ -95,10 +108,12 @@ class GameplayMailbox:
     def publish(self,map_name,*,active=True,gui=False,sprint=False,attack=False,use=False):
         if not map_name or not all(c.isascii() and (c.isalnum() or c=='_') for c in map_name):raise ValueError('invalid map')
         if self.map is not None and self.map!=map_name:
-            self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[]
+            self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[];self.navigation.clear()
         self.map=map_name
         records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)}']
         if active:
+            records+=[' '.join(map(str,('golem',*row))) for row in self.mobs if row[1] in ('iron_golem','snow_golem')][:8]
+            records+=[' '.join(map(str,('nav',*row))) for row,at in self.navigation.values() if time.monotonic()-at<1.5]
             if time.monotonic()-self.signals_at<0.75:
                 records+=[' '.join(map(str,('signal',*e))) for e in self.signals]
             if self.equipment is not None and time.monotonic()-self.equipment_at<0.75:

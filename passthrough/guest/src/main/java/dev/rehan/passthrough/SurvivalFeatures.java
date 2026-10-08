@@ -18,6 +18,7 @@ import net.minecraft.world.level.GameType;
 /** Opt-in limited-resource play, equipment heartbeat, and useful friendly mobs. */
 public final class SurvivalFeatures {
     private static int ticks;
+    private static long lastIgnition;
     public static void register(){
         CommandRegistrationCallback.EVENT.register((dispatcher,access,environment)-> {
             var root=Commands.literal("l4d2mc");
@@ -61,6 +62,31 @@ public final class SurvivalFeatures {
         // Prevent independent Minecraft death/starvation; Source is authoritative.
         p.getAbilities().invulnerable=true;
         if(p.getFoodData().getFoodLevel()>14)p.getFoodData().setFoodLevel(14);
+    }
+    public static void hostHealth(com.google.gson.JsonArray values){
+        if(values==null || values.size()!=4)return;
+        double hp=values.get(0).getAsDouble(),temporary=values.get(1).getAsDouble(),maximum=values.get(2).getAsDouble();
+        boolean incap=values.get(3).getAsBoolean();
+        if(!Double.isFinite(hp+temporary+maximum) || maximum<=0 || maximum>1000 || hp<0 || hp>1000 || temporary<0 || temporary>1000)return;
+        MinecraftServer s=WorldBridge.server();if(s==null)return;
+        s.execute(()->{if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
+            ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
+            p.setHealth(GuestMessages.health(hp,maximum,incap));
+            p.setAbsorptionAmount(incap?0:(float)Math.clamp(temporary/maximum*20,0,20));
+        });
+    }
+    public static void igniteSurface(double x,double y,double z){
+        MinecraftServer s=WorldBridge.server();if(s==null || !Double.isFinite(x+y+z))return;
+        s.execute(()->{
+            if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
+            ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
+            if(p.distanceToSqr(x,y,z)>36 || System.nanoTime()-lastIgnition<350_000_000L)return;
+            var hand=p.getMainHandItem().is(Items.FLINT_AND_STEEL)?InteractionHand.MAIN_HAND:InteractionHand.OFF_HAND;
+            ItemStack tool=p.getItemInHand(hand);if(!tool.is(Items.FLINT_AND_STEEL))return;
+            lastIgnition=System.nanoTime();
+            if(!p.isCreative())tool.hurtAndBreak(1,p,hand);
+            Passthrough.events.accept(String.format(java.util.Locale.ROOT,"{\"t\":\"ignite\",\"pos\":[%.4f,%.4f,%.4f]}",x,y,z));
+        });
     }
     public static void equipmentHit(int amount,boolean shield){
         MinecraftServer s=WorldBridge.server();if(s==null || amount<0 || amount>100)return;

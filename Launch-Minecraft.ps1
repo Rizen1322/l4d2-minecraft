@@ -1,4 +1,4 @@
-﻿param([string]$Game = 'E:\SteamLibrary\steamapps\common\Left 4 Dead 2', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel')
+﻿param([string]$Game = 'E:\SteamLibrary\steamapps\common\Left 4 Dead 2', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
 $ErrorActionPreference = 'Stop'
 $taskRoot = $PSScriptRoot
 $gameExe = Join-Path $Game 'left4dead2.exe'
@@ -12,7 +12,7 @@ $playCfg = Join-Path $Game ('left4dead2\cfg\' + $playCfgName + '.cfg')
 $restoreCfg = Join-Path $Game ('left4dead2\cfg\' + $restoreCfgName + '.cfg')
 $configFile = Join-Path $Game 'left4dead2\cfg\config.cfg'
 $controlRecovery = Join-Path $taskRoot 'backups\passthrough-launch-controls.json'
-$controlledKeys = @('MOUSE1','MOUSE2','MOUSE3','MWHEELUP','MWHEELDOWN','e','q','f','t','/','F5','F9','ESCAPE') + (1..9 | ForEach-Object {[string]$_})
+$controlledKeys = @('MOUSE1','MOUSE2','MOUSE3','MWHEELUP','MWHEELDOWN','e','q','f','t','/','F5','F9') + (1..9 | ForEach-Object {[string]$_})
 $controlledVars = @('r_drawviewmodel','crosshair','cam_idealdist','cam_idealyaw','cam_idealpitch','cam_ideallag')
 if (!('L4D2MC.MonotonicClock' -as [type])) {
     Add-Type -Namespace L4D2MC -Name MonotonicClock -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern ulong GetTickCount64();'
@@ -88,8 +88,10 @@ try {
     $restoreText = $release + (($controlledKeys | ForEach-Object {'unbind "' + $_ + '"'}) -join "`n") + "`nr_drawviewmodel 1`ncrosshair 1`ncam_ideallag 4`nfirstperson`n" + ($savedLines -join "`n") + "`ncl_mouseenable 1`n"
     [IO.File]::WriteAllText($restoreCfg,$restoreText,[Text.Encoding]::ASCII)
     $bridgeScript = Join-Path $taskRoot 'passthrough\bridge.py'
-    $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList @('"' + $bridgeScript + '"', '--game', '"' + $Game + '"','--play-cfg',$playCfgName,'--restore-cfg',$restoreCfgName) -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
-    Start-Process 'C:\Program Files (x86)\Steam\steam.exe' -ArgumentList ('-applaunch 550 -insecure -novid -windowed -w 1280 -h 720 -console -condebug +map ' + $Map) -WindowStyle Hidden
+    $windowFlags = '-windowed -w ' + $Width + ' -h ' + $Height
+    if($Borderless){$windowFlags += ' -noborder'}
+    $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList @('"' + $bridgeScript + '"', '--game', '"' + $Game + '"','--play-cfg',$playCfgName,'--restore-cfg',$restoreCfgName,'--width',[string]$Width,'--height',[string]$Height) -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
+    Start-Process 'C:\Program Files (x86)\Steam\steam.exe' -ArgumentList ('-applaunch 550 -insecure -novid ' + $windowFlags + ' -console -condebug +map ' + $Map) -WindowStyle Hidden
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     $nextProbe = [DateTime]::UtcNow.AddSeconds(12)
     while ([DateTime]::UtcNow -lt $deadline) {

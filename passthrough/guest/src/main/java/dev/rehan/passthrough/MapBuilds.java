@@ -27,6 +27,8 @@ public final class MapBuilds {
     private static int retryTicks;
     private static boolean recovering,commitPending;
     private static Path directory;
+    private static volatile long requestedEpoch;
+    private static long epoch=-1;
     private static String map="",pending="";
     private static boolean applying;
     private static int ticks;
@@ -34,7 +36,7 @@ public final class MapBuilds {
     public static void attach(MinecraftServer s){
         Path root=s.getWorldPath(LevelResource.ROOT).normalize();
         server=root.getFileName().toString().equals("l4d2mc-guest")?s:null;
-        cells.clear();touched.clear();edits.clear();map="";pending="";recovering=false;commitPending=false;retryTicks=0;ready=server==null;
+        cells.clear();touched.clear();edits.clear();epoch=-1;map="";pending="";recovering=false;commitPending=false;retryTicks=0;ready=server==null;
         if(server==null)return;
         directory=root.resolve("l4d2mc-maps");
         try {
@@ -47,11 +49,29 @@ public final class MapBuilds {
             Path journal=directory.resolve("transition.txt");
             if(Files.exists(journal)) {
                 List<String> intent=Files.readAllLines(journal);
-                if(intent.size()!=2 || !valid(intent.get(0)) || !valid(intent.get(1)))throw new IllegalStateException("Invalid transition journal");
+                if((intent.size()!=2 && intent.size()!=3) || !valid(intent.get(0)) || !valid(intent.get(1)))throw new IllegalStateException("Invalid transition journal");
                 // Restore the original complete archive before accepting another
                 // map. Never capture the partially edited vanilla world.
-                Map<BlockPos,Cell> original=read(intent.get(0)),target=read(intent.get(1));
+                Path originFile=directory.resolve(intent.get(0)+".dat");
+                if(intent.size()==3){
+                    String snap=intent.get(2);if(!snap.matches("[A-Za-z0-9_-]+\\.dat"))throw new IllegalStateException("Invalid snapshot reference");
+                    originFile=directory.resolve("snapshots").resolve(snap);
+                    if(!Files.exists(originFile))throw new IllegalStateException("Recovery snapshot missing");
+                }
+                Map<BlockPos,Cell> original=readFile(originFile),target=read(intent.get(1));
                 Set<BlockPos> union=new LinkedHashSet<>(original.keySet());union.addAll(target.keySet());
+                Path dirty=directory.resolve("checkpoint.dat");
+                if(Files.exists(dirty)) {
+                    var checkpoint=NbtIo.readCompressed(dirty,NbtAccounter.create(8L*1024*1024));
+                    var footprint=checkpoint.getList("positions").orElseThrow();
+                    if(footprint.size()>60000)throw new IllegalStateException("Recovery footprint too large");
+                    for(int i=0;i<footprint.size();i++) {
+                        var row=footprint.getCompoundOrEmpty(i);var p=new BlockPos(row.getInt("x").orElseThrow(),row.getInt("y").orElseThrow(),row.getInt("z").orElseThrow());
+                        if(Math.abs(p.getX())>1023 || Math.abs(p.getZ())>1023 || !s.overworld().isInWorldBounds(p))throw new IllegalStateException("Recovery footprint outside bounds");
+                        union.add(p);
+                    }
+                }
+                if(union.size()>60000)throw new IllegalStateException("Recovery union too large");
                 touched.addAll(union); // Keep tombstones through repeated interrupted recoveries.
                 for(BlockPos p:union)edits.add(new Edit(p,new Cell(Blocks.AIR.defaultBlockState(),null)));
                 for(var entry:original.entrySet())edits.add(new Edit(entry.getKey(),entry.getValue()));
@@ -87,29 +107,46 @@ public final class MapBuilds {
         }catch(Exception e){Passthrough.LOG.error("Cannot open map archive; switching disabled",e);server=null;ready=false;}
     }
     private static boolean valid(String name){return name.matches("[A-Za-z0-9_]{1,96}");}
-    public static void select(String name){
-        if(valid(name))requested=name; // Retain requests received before SERVER_STARTED.
+    public static void select(String name,long session){
+        if(valid(name) && session>=0){requestedEpoch=session;requested=name;} // Retain requests received before SERVER_STARTED.
     }
     private static void begin(String name){
         if(!pending.isEmpty() || commitPending)return;
-        if(map.equals(name)){ready=true;notice();return;}
-        ready=false;RedstoneLinks.clear();WorldBridge.resetBarricades();MobWar.hostGone();
+        if(map.equals(name) && epoch==requestedEpoch){ready=true;notice();return;}
+        ready=false;HostNavigation.clear();RedstoneLinks.clear();WorldBridge.resetBarricades();
         try {
-            Map<BlockPos,Cell> next=read(name); // Validate before touching the current world.
-            if(map.isEmpty() && !next.isEmpty())map="legacy_unassigned";
+            Map<BlockPos,Cell> next=Map.of(); // New host round/map begins with an empty guest scene; preserve the previous archive first.
+            if(map.isEmpty() && !cells.isEmpty())map="legacy_unassigned";
             if(!map.isEmpty()) {
                 save();
-                Path temp=directory.resolve("transition.tmp");Files.write(temp,List.of(map,name));
+                Path snapshots=directory.resolve("snapshots");Files.createDirectories(snapshots);
+                String snapshot=map+"-"+epoch+"-"+UUID.randomUUID()+".dat";
+                Files.copy(directory.resolve(map+".dat"),snapshots.resolve(snapshot));
+                Path temp=directory.resolve("transition.tmp");Files.write(temp,List.of(map,name,snapshot));
                 Files.move(temp,directory.resolve("transition.txt"),StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
             }
-            pending=name;
+            MobWar.hostGone();clearEntities();
+            epoch=requestedEpoch;pending=name;
             for(BlockPos p:cells.keySet())edits.add(new Edit(p,new Cell(Blocks.AIR.defaultBlockState(),null)));
             for(var entry:next.entrySet())edits.add(new Edit(entry.getKey(),entry.getValue()));
-            // The first map adopts existing builds rather than erasing them.
-            if(map.isEmpty() && next.isEmpty()){pending="";edits.clear();map=name;commitPending=true;commit();}
+            // Empty initial scenes need no block-clear transaction.
+            if(map.isEmpty() && edits.isEmpty()){pending="";map=name;commitPending=true;commit();}
         }catch(Exception e){pending="";edits.clear();retryTicks=100;Passthrough.LOG.error("Map archive failed; existing builds preserved",e);}
     }
-    private static void notice(){Passthrough.events.accept("{\"t\":\"mapready\",\"map\":\""+map+"\",\"ready\":"+ready+"}");}
+    public static boolean ownsEntity(net.minecraft.world.entity.Entity e){
+        if(e instanceof net.minecraft.world.entity.player.Player)return true;
+        if(server==null || e.level()!=server.overworld())return true;
+        String tag="l4d2mc_scene_"+map+"_"+epoch;
+        boolean stale=e.entityTags().stream().anyMatch(t->t.startsWith("l4d2mc_scene_") && !t.equals(tag));
+        if(stale){e.discard();return false;}
+        e.addTag(tag);return true;
+    }
+    private static void clearEntities(){
+        if(server==null)return;
+        var all=new ArrayList<net.minecraft.world.entity.Entity>();server.overworld().getAllEntities().forEach(all::add);
+        for(var e:all)if(!(e instanceof net.minecraft.world.entity.player.Player))e.discard();
+    }
+    private static void notice(){Passthrough.events.accept("{\"t\":\"mapready\",\"map\":\""+map+"\",\"epoch\":"+epoch+",\"ready\":"+ready+"}");}
     private static Cell capture(ServerLevel level,BlockPos p,BlockState state){
         BlockEntity be=level.getBlockEntity(p);
         return new Cell(state,be==null?null:be.saveWithFullMetadata(level.registryAccess()));
@@ -139,7 +176,10 @@ public final class MapBuilds {
                     // level.getBlockEntity lookup waits for that same future and
                     // recursively enters other chunk callbacks: use this chunk.
                     BlockEntity be=chunk.getBlockEntity(p);
-                    cells.put(p.immutable(),new Cell(state,be==null?null:be.saveWithFullMetadata(level.registryAccess())));
+                    if(!map.isEmpty() && !requested.isEmpty()) {
+                        Cell expected=cells.get(p);
+                        if(expected==null){touched.add(p.immutable());edits.add(new Edit(p.immutable(),new Cell(Blocks.AIR.defaultBlockState(),null)));}
+                    } else cells.put(p.immutable(),new Cell(state,be==null?null:be.saveWithFullMetadata(level.registryAccess())));
                 }
             }
         }
@@ -155,7 +195,10 @@ public final class MapBuilds {
         }
     }
     private static Map<BlockPos,Cell> read(String name)throws Exception {
-        Path file=directory.resolve(name+".dat");Map<BlockPos,Cell> result=new LinkedHashMap<>();
+        return readFile(directory.resolve(name+".dat"));
+    }
+    private static Map<BlockPos,Cell> readFile(Path file)throws Exception {
+        Map<BlockPos,Cell> result=new LinkedHashMap<>();
         if(!Files.exists(file))return result;
         CompoundTag root=NbtIo.readCompressed(file,NbtAccounter.create(32L*1024*1024));
         if(root.getIntOr("version",0)!=1)throw new IllegalStateException("Unknown archive version");
@@ -204,8 +247,9 @@ public final class MapBuilds {
     public static void tick(MinecraftServer s){
         if(s!=server)return;
         if(retryTicks>0)retryTicks--;
-        if(pending.isEmpty() && !requested.isEmpty() && !map.equals(requested) && retryTicks==0)begin(requested);
-        else if(pending.isEmpty() && !commitPending && !requested.isEmpty() && map.equals(requested)){ready=true;if(ticks%20==0)notice();}
+        if(pending.isEmpty() && !edits.isEmpty() && !map.isEmpty()){pending=map;ready=false;}
+        if(pending.isEmpty() && !requested.isEmpty() && (!map.equals(requested) || epoch!=requestedEpoch) && retryTicks==0)begin(requested);
+        else if(pending.isEmpty() && !commitPending && !requested.isEmpty() && map.equals(requested) && epoch==requestedEpoch){ready=true;if(ticks%20==0)notice();}
         if(!pending.isEmpty()) {
             applying=true;WorldBridge.quietGround(true);
             try {
@@ -231,8 +275,8 @@ public final class MapBuilds {
     private static void commit(){
         try {
             save();Files.deleteIfExists(directory.resolve("transition.txt"));
-            recovering=false;commitPending=false;ready=map.equals(requested);notice();
+            recovering=false;commitPending=false;ready=map.equals(requested) && epoch==requestedEpoch;notice();
         }catch(Exception e){ready=false;Passthrough.LOG.error("Cannot commit map archive",e);}
     }
-    public static void detach(){try{save();}catch(Exception e){Passthrough.LOG.error("Cannot save map builds",e);}server=null;cells.clear();touched.clear();edits.clear();earlyChunks.clear();requested="";recovering=false;commitPending=false;ready=true;}
+    public static void detach(){HostNavigation.clear();try{save();}catch(Exception e){Passthrough.LOG.error("Cannot save map builds",e);}server=null;cells.clear();touched.clear();edits.clear();earlyChunks.clear();requested="";recovering=false;commitPending=false;ready=true;}
 }

@@ -340,16 +340,23 @@ namespace
 	void on_present(effect_runtime *runtime)
 	{
         source_camera::publish_visibility(source_camera::gameplay_visible());
-        const bool worldCursor=g_active && g_sceneVisible && g_guestInputAlive && !g_guestUiOpen
+        const bool hostMenu=source_camera::menu_visible();
+        const bool worldCursor=!hostMenu && g_active && g_sceneVisible && g_guestInputAlive && !g_guestUiOpen
             && source_camera::gameplay_visible() && GetForegroundWindow()==runtime->get_hwnd();
         if(!worldCursor)restore_world_cursor_counter();
 		watch_effect_file(runtime);
+        if(hostMenu) {
+            while(g_cursorShows>0){ShowCursor(FALSE);--g_cursorShows;}
+            source_input::yield_to_menu();
+            g_releasedSourceMouse=false;
+            return;
+        }
 		if (g_guestUiOpen && g_guestInputAlive && g_sceneVisible && source_camera::gameplay_visible() &&
 			GetForegroundWindow() == runtime->get_hwnd())
 		{
 			source_input::mouse(false);
             g_releasedSourceMouse=true;
-			runtime->block_input_next_frame();
+			// Source must receive Escape even while the Minecraft inventory is open.
 			ClipCursor(nullptr);
 			if (g_cursorShows == 0) {
 				int count;
@@ -385,7 +392,7 @@ namespace
 		runtime->get_screenshot_width_and_height(&bw, &bh);
 		g_bbWidth = bw;
 		g_bbHeight = bh;
-		bool on = g_active && g_sceneVisible && source_camera::gameplay_visible() && open_mapping();
+		bool on = g_active && g_sceneVisible && !source_camera::menu_visible() && source_camera::gameplay_visible() && open_mapping();
 		if (on)
 			upload(runtime);
 		on = on && g_hasFrame && GetTickCount64() - g_lastNewFrame < 500;

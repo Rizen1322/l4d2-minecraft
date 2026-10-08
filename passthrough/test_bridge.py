@@ -23,6 +23,12 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(movement_mask({0x45},bindings),0)
 
 class InputTests(unittest.TestCase):
+    def test_escape_is_owned_by_source_in_inventory_and_world(self):
+        for gui in (True,False):
+            state={}
+            self.assertEqual(relay_keys({0x1B},state,focused=True,gui=gui),[])
+            self.assertEqual(relay_keys(set(),state,focused=True,gui=gui),[])
+
     def test_inventory_close_does_not_reopen_while_e_still_held(self):
         state={}
         relay_keys({0x45},state,focused=True,gui=False)

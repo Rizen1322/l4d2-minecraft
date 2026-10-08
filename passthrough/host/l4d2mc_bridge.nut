@@ -26,9 +26,10 @@ foreach(staleClass in ["prop_dynamic","prop_dynamic_override"]) {
 }
 foreach(prop in staleMobProps)if(prop.IsValid())prop.Kill();
 PrecacheModel("models/l4d2mc/cube.mdl");
-::L4D2MCBridge <- { frame = 0, anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
+::L4D2MCBridge <- { frame = 0, epoch=RandomInt(1,2000000000), anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
 IncludeScript("l4d2mc_gameplay");
 IncludeScript("l4d2mc_survival");
+IncludeScript("l4d2mc_navigation");
 L4D2MCBridge.ClearCollision <- function() {
     foreach (key, block in blocks) if (block.IsValid()) block.Kill();
     blocks.clear();
@@ -142,19 +143,31 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
             }
         }
     }
+    local pinned=false;
+    foreach(prop in ["m_pounceAttacker","m_jockeyAttacker","m_tongueOwner","m_carryAttacker","m_pummelAttacker"])
+        if(NetProps.HasProp(player,prop) && NetProps.GetPropEntity(player,prop)!=null)pinned=true;
     local visible=true;
     if(NetProps.HasProp(player,"m_hViewEntity")) {
         local view=NetProps.GetPropEntity(player,"m_hViewEntity");
-        if(view!=null && view!=player)visible=false;
+        if(view!=null && view!=player && !pinned)visible=false;
     }
     if((NetProps.GetPropInt(player,"m_fFlags")&32)!=0) {
         local id=player.GetEntityIndex();
         local own=id in L4D2MCBridge.gameplay.frozen && L4D2MCBridge.gameplay.frozen[id].entity==player && !L4D2MCBridge.gameplay.frozen[id].old;
-        if(!own)visible=false;
+        if(!own && !pinned)visible=false;
     }
     L4D2MCBridge.frame++;
     local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"hit\":%s,\"normal\":%s,\"buttons\":%d}",
         L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,surface,normal,player.GetButtonMask());
+    data=data.slice(0,data.len()-1)+",\"pinned\":"+(pinned?"true":"false")+"}";
+    data=data.slice(0,data.len()-1)+format(",\"epoch\":%d}",L4D2MCBridge.epoch);
+    local maxHp=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;
+    local temporary=NetProps.HasProp(player,"m_healthBuffer")?NetProps.GetPropFloat(player,"m_healthBuffer"):0.0;
+    if(NetProps.HasProp(player,"m_healthBufferTime")) {
+        local decay=Convars.GetFloat("pain_pills_decay_rate");if(decay!=null)temporary-=(Time()-NetProps.GetPropFloat(player,"m_healthBufferTime"))*decay;
+        if(temporary<0)temporary=0;
+    }
+    data=data.slice(0,data.len()-1)+format(",\"health\":[%d,%.3f,%d,%s]}",player.GetHealth(),temporary,maxHp,player.IsIncapacitated() || player.GetHealth()<=0?"true":"false");
     data=data.slice(0,data.len()-1)+",\"visible\":"+(visible?"true":"false")+",\"nativeuse\":false"+",\"usable\":"+(L4D2MCBridge.Usable(player)?"true":"false")+",\"actors\":"+L4D2MCBridge.ActorJson(player)+",\"wheel\":"+L4D2MCBridge.gameplay.wheel+",\"replies\":[";
     local replyCount=0;foreach(id,reply in L4D2MCBridge.gameplay.replies)data+=(replyCount++==0?"":",")+reply;
     data+= "],\"physground\":[";

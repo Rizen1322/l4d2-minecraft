@@ -306,3 +306,29 @@ and NaN toughness. verifyGuestMessages is required by Gradle check/build; no
 Minecraft process started by test. Java build and40Python tests pass. Fixed JAR
 installed and SHA256 matched. No saves modified/restored, no game launched;
 next normal user launch remains required for in-game confirmation.
+
+
+2026-10-09: Offline update requested without game launches. Added bounded
+Source navmesh routes (12 jobs,64 neighbor checks/think, actual stair floor and
+headroom, pending-target jitter retained) and height-sensitive Java cursor.
+Esc stays native Source; VEngineVGui001 IsGameUIVisible gates compositor/input,
+yields cursor to VGUI, and closes guest GUI without opening Minecraft pause.
+Removed blanket ReShade input block. Added2560x1440 noborder BAT for measured
+primary monitor. Shield directional stumble/airborne SI stagger, Smoker tongue
+release, native DropFire with6 pool cap, Source hearts/absorption,8 non-solid
+AI golem targets/contact damage, low-ledge jump and embedded-body recovery.
+Diamond/netherite Source180/220 damage, normal infected single hit, .35 s cap.
+Source epoch/round_start now requests fresh scene on maps/restarts; mobs cleared,
+old chunk cells quarantined. Previous builds copied to immutable UUID snapshots
+before reset; entity deletion follows durable save+journal (review findings
+fixed). Source pin flags select Steve third person. Full Source animations and
+runtime confirmation remain outstanding. Official Squirrel3.2 standalone parser
+compiles own scripts only; no game executes. Source API calls still need runtime
+confirmation. Build,44 Python,2 standalone JVM checks, launcher parse recorded.
+
+Final review also fixed same-map reset crash recovery: transition journal now
+references immutable source snapshot (safe filename, exists check); recovery
+union includes bounded validated checkpoint tombstones even with transition.
+Old two-line journals remain supported. Guest rebuilt and reinstalled after
+this repair. Installed SHA256 matches JAR/native/all4VScripts. Diagnostic-only
+collision_probe.nut is intentionally not installed. No games started.

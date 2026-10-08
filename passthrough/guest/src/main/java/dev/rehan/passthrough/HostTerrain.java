@@ -21,7 +21,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 /** Transient per-entity Source floor/wall planes. No saved or selectable blocks. */
 public final class HostTerrain {
     private record Support(Entity entity,double x,double z,boolean floor,double y,
-                           double xmin,double xmax,double zmin,double zmax,long at) {}
+                           double xmin,double xmax,double zmin,double zmax,double[] tops,long at) {}
     private static final HashMap<Integer,Support> supports=new HashMap<>(); // Server thread only.
     // Immutable snapshots also supply the client's predicted TNT/item collisions.
     private static volatile Map<Integer,Support> clientSupports=Map.of();
@@ -50,9 +50,9 @@ public final class HostTerrain {
         if(current==null || rows.size()>64)return;
         List<double[]> copy=new ArrayList<>();
         for(var row:rows){
-            var a=row.getAsJsonArray();if(a.size()!=9)continue;
-            double[] v=new double[9];boolean valid=true;
-            for(int i=0;i<9;i++){v[i]=a.get(i).getAsDouble();if(!Double.isFinite(v[i]))valid=false;}
+            var a=row.getAsJsonArray();if(a.size()!=9 && a.size()!=13)continue;
+            double[] v=new double[13];boolean valid=true;
+            for(int i=0;i<13;i++){v[i]=i<a.size()?a.get(i).getAsDouble():v[4]+8;if(!Double.isFinite(v[i]))valid=false;}
             if(valid && v[0]>0 && v[0]<Integer.MAX_VALUE && v[0]==Math.rint(v[0])
                     && Math.abs(v[1])<=1023 && Math.abs(v[2])<=1023 && Math.abs(v[4])<=1023
                     && Math.abs(v[5])<=4096 && Math.abs(v[6])<=4096 && Math.abs(v[7])<=4096 && Math.abs(v[8])<=4096)copy.add(v);
@@ -60,7 +60,7 @@ public final class HostTerrain {
         long received=System.nanoTime();
         var clientCopy=new HashMap<>(clientSupports);
         clientCopy.entrySet().removeIf(entry->received-entry.getValue().at>1_000_000_000L);
-        for(double[] v:copy)clientCopy.put((int)v[0],new Support(null,v[1],v[2],v[3]==1,v[4],v[5],v[6],v[7],v[8],received));
+        for(double[] v:copy)clientCopy.put((int)v[0],new Support(null,v[1],v[2],v[3]==1,v[4],v[5],v[6],v[7],v[8],java.util.Arrays.copyOfRange(v,9,13),received));
         clientSupports=Map.copyOf(clientCopy);
         current.execute(()->{
             if(server!=current || !Passthrough.active)return;
@@ -69,7 +69,7 @@ public final class HostTerrain {
                 Entity e=level.getEntity((int)v[0]);
                 if(e==null || e instanceof Player || MobWar.isProxy(e))continue;
                 if(Math.hypot(e.getX()-v[1],e.getZ()-v[2])>3)continue;
-                Support s=new Support(e,v[1],v[2],v[3]==1,v[4],v[5],v[6],v[7],v[8],System.nanoTime());
+                Support s=new Support(e,v[1],v[2],v[3]==1,v[4],v[5],v[6],v[7],v[8],java.util.Arrays.copyOfRange(v,9,13),System.nanoTime());
                 if(s.floor && e.getY()<s.y && s.y-e.getY()<2){
                     e.setPos(e.getX(),s.y,e.getZ());
                     e.setDeltaMovement(e.getDeltaMovement().multiply(1,0,1));e.setOnGround(true);
@@ -79,6 +79,24 @@ public final class HostTerrain {
         });
     }
 
+    public static void recover(int id,double x,double y,double z){
+        MinecraftServer current=server;if(current==null || !Double.isFinite(x+y+z))return;
+        current.execute(()->{var e=current.overworld().getEntity(id);
+            if(!(e instanceof Mob) || !Passthrough.active || e.distanceToSqr(x,y,z)>64)return;
+            e.setPos(x,y,z);e.setDeltaMovement(0,0,0);supports.remove(id);
+            if(e instanceof Mob m)HostNavigation.stuck(m);
+        });
+    }
+    public static boolean lowLedge(Mob mob,double mx,double mz){
+        Support s=supports.get(mob.getId());
+        if(s==null || s.entity!=mob || System.nanoTime()-s.at>500_000_000L || !s.floor)return false;
+        double radius=mob.getBbWidth()/2+.15;
+        int axis=Math.abs(mx)>=Math.abs(mz)?(mx<0?0:1):(mz<0?2:3);
+        double gap=switch(axis){case 0->mob.getX()-s.xmin-radius;case 1->s.xmax-mob.getX()-radius;
+            case 2->mob.getZ()-s.zmin-radius;default->s.zmax-mob.getZ()-radius;};
+        double rise=s.tops[axis]-mob.getY();
+        return gap<.5 && gap>-.2 && rise>.05 && rise<=1.01;
+    }
     public static List<VoxelShape> shapes(Entity e,AABB query){
         if(!Passthrough.active || e==null || e instanceof Player || MobWar.isProxy(e))return List.of();
         boolean client=e.level().isClientSide();
@@ -88,10 +106,10 @@ public final class HostTerrain {
         List<VoxelShape> result=new ArrayList<>(5);
         double lo=s.y-8,hi=s.y+8;
         if(s.floor)add(result,query,new AABB(s.x-2,s.y-0.25,s.z-2,s.x+2,s.y,s.z+2));
-        if(s.xmin>-2048)add(result,query,new AABB(s.xmin-0.25,lo,s.z-2,s.xmin,hi,s.z+2));
-        if(s.xmax<2048)add(result,query,new AABB(s.xmax,lo,s.z-2,s.xmax+0.25,hi,s.z+2));
-        if(s.zmin>-2048)add(result,query,new AABB(s.x-2,lo,s.zmin-0.25,s.x+2,hi,s.zmin));
-        if(s.zmax<2048)add(result,query,new AABB(s.x-2,lo,s.zmax,s.x+2,hi,s.zmax+0.25));
+        if(s.xmin>-2048)add(result,query,new AABB(s.xmin-0.25,lo,s.z-2,s.xmin,s.tops[0],s.z+2));
+        if(s.xmax<2048)add(result,query,new AABB(s.xmax,lo,s.z-2,s.xmax+0.25,s.tops[1],s.z+2));
+        if(s.zmin>-2048)add(result,query,new AABB(s.x-2,lo,s.zmin-0.25,s.x+2,s.tops[2],s.zmin));
+        if(s.zmax<2048)add(result,query,new AABB(s.x-2,lo,s.zmax,s.x+2,s.tops[3],s.zmax+0.25));
         return result;
     }
     private static void add(List<VoxelShape> result,AABB query,AABB shape){if(query.intersects(shape))result.add(Shapes.create(shape));}

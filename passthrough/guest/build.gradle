@@ -55,3 +55,10 @@ check.dependsOn verifyGuestMessages
 
 // Tests here are standalone main programs run by verifyGuestMessages, not JUnit.
 tasks.named('test') { failOnNoDiscoveredTests = false }
+
+tasks.register('verifyNavCursor', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.NavCursorTest'
+}
+check.dependsOn verifyNavCursor

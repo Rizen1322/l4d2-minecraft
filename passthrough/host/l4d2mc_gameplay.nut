@@ -23,6 +23,7 @@ L4D2MCBridge.Hide <- function(e) {
     NetProps.SetPropInt(e,"m_fEffects",flags|32);
 };
 L4D2MCBridge.RestoreAppearance <- function() {
+    if("SurvivalCleanup" in this)SurvivalCleanup();
     foreach(id,v in gameplay.hidden)if(v.entity.IsValid() && !v.old)
         NetProps.SetPropInt(v.entity,"m_fEffects",NetProps.GetPropInt(v.entity,"m_fEffects")&(~32));
     gameplay.hidden.clear();
@@ -195,11 +196,20 @@ L4D2MCBridge.Event <- function(fields,player) {
             }
             printl("[L4D2MC FOOD] health="+healed);
         }
-    } else if(kind=="melee" && fields.len()==5) {
+    } else if(kind=="ignite" && fields.len()==6) {
+        IgniteGround(fields,player);
+    } else if(kind=="melee" && (fields.len()>=5 && fields.len()<=7)) {
+        if(fields.len()>=6 && Integer(fields[5])==1)CutTongue(player);
         local damage=Number(fields[3],1500),range=Number(fields[4],256);
         if(damage<0 || range<=0)throw "invalid melee";
         local p=player.EyePosition(),trace=Raycast(p,p+player.EyeAngles().Forward()*range,player);
         if("enthit" in trace && IsCombatTarget(trace.enthit)) {
+            local tier=fields.len()==7?Integer(fields[6]):0;if(tier>2)throw "invalid sword tier";
+            if(tier>0) {
+                if("swordAt" in survival && Time()-survival.swordAt<0.35)return;
+                survival.swordAt<-Time();damage=tier==2?220.0:180.0;
+                if(trace.enthit.GetClassname()=="infected")damage=trace.enthit.GetHealth()+1.0;
+            }
             trace.enthit.TakeDamage(damage,128,player); // DMG_CLUB, Source attribution retained.
             printl("[L4D2MC COMBAT] melee damage="+damage);
         }
@@ -273,6 +283,28 @@ L4D2MCBridge.Physics <- function(fields,player) {
     if(v.proxy!=null){if(v.proxy.IsValid())v.proxy.Kill();v.proxy=null;}
 
 };
+L4D2MCBridge.RecoverMob <- function(id,v) {
+    if("recoverAt" in v && Time()<v.recoverAt)return;v.recoverAt<-Time()+1;
+    local candidates=[];
+    if("safe" in v && (v.safe-v.pos).Length()<192)candidates.append(v.safe);
+    foreach(dir in [Vector(1,0,0),Vector(-1,0,0),Vector(0,1,0),Vector(0,-1,0)])candidates.append(v.pos+dir*(v.width+48)+Vector(0,0,48));
+    local radius=v.width/2;
+    foreach(p in candidates) {
+        local floor={start=p+Vector(0,0,16),end=p-Vector(0,0,128),ignore=null,mask=16395};TraceLine(floor);
+        if(("startsolid" in floor && floor.startsolid) || !("hit" in floor && floor.hit))continue;
+        local at=floor.pos+Vector(0,0,1),clear=true;
+        foreach(x in [-radius,0,radius])foreach(y in [-radius,0,radius]) {
+            local t={start=at+Vector(x,y,1),end=at+Vector(x,y,v.height+2),ignore=null,mask=16395};TraceLine(t);
+            if(("startsolid" in t && t.startsolid) || ("hit" in t && t.hit)){clear=false;break;}
+        }
+        if(!clear)continue;
+        foreach(h in [v.height/2,v.height-1])foreach(dir in [Vector(1,0,0),Vector(0,1,0)]) {
+            local t={start=at+Vector(0,0,h)-dir*radius,end=at+Vector(0,0,h)+dir*radius,ignore=null,mask=16395};TraceLine(t);
+            if(("startsolid" in t && t.startsolid) || ("hit" in t && t.hit)){clear=false;break;}
+        }
+        if(clear){Reply(format("\"t\":\"mobpos\",\"id\":%d,\"p\":[%.4f,%.4f,%.4f]",id,at.x/32,at.z/32,-at.y/32));return;}
+    }
+};
 L4D2MCBridge.GroundPhysics <- function() {
     gameplay.ground.clear();local list=[],stale=[];
     foreach(id,v in gameplay.physics) {
@@ -310,6 +342,7 @@ L4D2MCBridge.GroundPhysics <- function() {
         // round-robin/network delay. A midpoint-only ray misses doors/corners.
         local radius=v.width/2,side=radius>1?radius-1:0,distance=radius+96;
         local low=v.height>64?24:v.height/4;
+        local tops=[p.z/32+8,p.z/32+8,p.z/32+8,p.z/32+8];
         local embedded=false,escapeAxis=-1,escapeDistance=radius+1;
         foreach(axis,dir in [Vector(-1,0,0),Vector(1,0,0),Vector(0,1,0),Vector(0,-1,0)]) {
             foreach(h in [low,v.height/2,v.height-1])foreach(offset in [-side,0,side]) {
@@ -334,10 +367,30 @@ L4D2MCBridge.GroundPhysics <- function() {
                 }
             }
         }
+        // Resolve a one-block ledge, retaining tall walls when any probe is ambiguous.
+        if(!embedded)foreach(axis,dir in [Vector(-1,0,0),Vector(1,0,0),Vector(0,1,0),Vector(0,-1,0)]) {
+            local edge=axis==0?xmin:axis==1?xmax:axis==2?zmin:zmax;
+            if(abs(edge)>2048)continue;
+            local at=axis<2?Vector(edge*32,p.y,p.z):Vector(p.x,-edge*32,p.z);at+=dir*2;
+            local top={start=at+Vector(0,0,40),end=at-Vector(0,0,2),ignore=ignore,mask=16395};TraceLine(top);
+            if(("startsolid" in top && top.startsolid) || !("hit" in top && top.hit))continue;
+            local normal="normal" in top?top.normal:("plane_normal" in top?top.plane_normal:null);
+            if(normal==null || normal.z<0.7 || top.pos.z<=p.z+2 || top.pos.z>p.z+32)continue;
+            local clear=true;
+            foreach(offset in [-side,0,side]) {
+                local across=axis<2?Vector(0,offset,0):Vector(offset,0,0);
+                local start=p+Vector(0,0,40)+across;
+                local t={start=start,end=start+dir*distance,ignore=ignore,mask=16395};TraceLine(t);
+                if(("startsolid" in t && t.startsolid) || ("hit" in t && t.hit)){clear=false;break;}
+                local roof={start=at+Vector(0,0,40)+across,end=at+Vector(0,0,40+v.height)+across,ignore=ignore,mask=16395};TraceLine(roof);
+                if(("startsolid" in roof && roof.startsolid) || ("hit" in roof && roof.hit)){clear=false;break;}
+            }
+            if(clear)tops[axis]=top.pos.z/32;
+        }
         if(embedded) {
             // Deep/ambiguous intersections retain the previous support until its
             // lease expires. Do not publish an unbounded path through the brush.
-            if(escapeAxis<0)continue;
+            if(escapeAxis<0){RecoverMob(id,v);continue;}
             // Preserve other samples' real wall hits. A shallow exit at one
             // corner must not erase the neighbouring brush at another corner.
             local clearance=escapeAxis==0?p.x-xmin*32-radius:
@@ -351,7 +404,8 @@ L4D2MCBridge.GroundPhysics <- function() {
             if(escapeAxis!=2)zmin=-(p.y+radius)/32;
             if(escapeAxis!=3)zmax=-(p.y-radius)/32;
         }
-        gameplay.ground.append(format("[%d,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f]",id,p.x/32,-p.y/32,floor,y,xmin,xmax,zmin,zmax));
+        if(!embedded && floor)v.safe<-Vector(p.x,p.y,y*32);
+        gameplay.ground.append(format("[%d,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f]",id,p.x/32,-p.y/32,floor,y,xmin,xmax,zmin,zmax,tops[0],tops[1],tops[2],tops[3]));
     }
     } catch(error){restore();throw error;}
     restore();
@@ -361,7 +415,7 @@ L4D2MCBridge.GameplayLease <- function() { return gameplay.armed && Time()-gamep
 L4D2MCBridge.ReadGameplay <- function(player) {
     local text=FileToString("l4d2mc_gameplay.txt");
     if(text==null || text.len()>18000)return GameplayLease();
-    local lines=split(text,"\r\n");if(lines.len()<1 || lines.len()>180)return GameplayLease();
+    local lines=split(text,"\r\n");if(lines.len()<1 || lines.len()>256)return GameplayLease();
     local header=split(lines[0]," ");
     if(header.len()!=6 && header.len()!=8)return GameplayLease();
     if(header[1]!=Director.GetMapName() || header[2]!="1")return false;
@@ -383,6 +437,8 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     for(local i=1;i<lines.len();i++) {
         local f=split(lines[i]," ");
         if(f.len()>0 && f[0]=="event")try{Event(f,player);}catch(error){printl("[L4D2MC EVENT] "+error);}
+        else if(f.len()>0 && f[0]=="golem")try{GolemTarget(f,player);}catch(error){printl("[L4D2MC GOLEM] "+error);}
+        else if(f.len()>0 && f[0]=="nav")try{NavRequest(f,player);}catch(error){printl("[L4D2MC NAV] "+error);}
         else if(f.len()>0 && f[0]=="projectile")try{Projectile(f,player);}catch(error){printl("[L4D2MC PROJECTILE] "+error);}
         else if(f.len()>0 && f[0]=="signal")try{Signal(f,player);}catch(error){printl("[L4D2MC SIGNAL] "+error);}
         else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
@@ -393,6 +449,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     Movement(player,header[4]=="1",header[5]=="1");
     GroundPhysics();
     SurvivalTick(player);
+    try{NavTick();}catch(error){printl("[L4D2MC NAV] "+error);navigation.jobs.clear();}
     if(NetProps.HasProp(player,"m_hActiveWeapon"))Hide(NetProps.GetPropEntity(player,"m_hActiveWeapon"));
     if(NetProps.HasProp(player,"m_hViewModel")) {
         for(local i=0;i<NetProps.GetPropArraySize(player,"m_hViewModel");i++)Hide(NetProps.GetPropEntityArray(player,"m_hViewModel",i));

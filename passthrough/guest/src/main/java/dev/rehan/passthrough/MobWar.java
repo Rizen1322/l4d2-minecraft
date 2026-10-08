@@ -101,6 +101,7 @@ public final class MobWar {
 
 	/** New mobs (and mobs loaded again) hunt proxies; stale proxies from an earlier session are removed. */
 	static void onEntityLoad(final Entity e, final ServerLevel level) {
+        if(!MapBuilds.ownsEntity(e))return;
 		if (e instanceof Villager v && v.entityTags().contains(PROXY_TAG) && !proxies.containsValue(v)) {
 			v.discard();
 			return;

@@ -24,7 +24,7 @@ POSE_SIZE = 128
 MINECRAFT_KEYS = {1:'attack', 2:'use', 4:'pick', 0x45:'inventory',
                   0x51:'drop', 0x46:'swap', 0x74:'perspective',
                   0x54:'chat', 0xBF:'command', 0x78:'inventory',
-                  0x1B:'escape', **{0x31+i:f'slot{i}' for i in range(9)}}
+                  **{0x31+i:f'slot{i}' for i in range(9)}}
 GUI_SCAN = {**{0x41+i:(4+i,97+i) for i in range(26)},
             **{0x31+i:(30+i,49+i) for i in range(9)},0x30:(39,48),
             0x0D:(40,13),0x08:(42,8),0x09:(43,9),0x20:(44,32),
@@ -48,7 +48,7 @@ def relay_keys(pressed, state, *, focused, gui):
             if before and not down:result.append({'t':'key','k':'inventory','down':False})
             state[key]=down
             continue
-        if gui and not (action=='escape' or key==0x78):
+        if gui and not (key==0x78):
             down = False
         before = state.get(key,False)
         if down != before:
@@ -258,6 +258,15 @@ class FrameHeartbeat:
 
 
 class RenderPose(FrameHeartbeat):
+    def menu_open(self):
+        if not self.view:
+            self.read()
+        if not self.view:return False
+        self.kernel.GetTickCount64.restype=ctypes.c_ulonglong
+        data=ctypes.string_at(self.view,128)
+        stamp=struct.unpack_from('<Q',data,72)[0]
+        return 0<=self.kernel.GetTickCount64()-stamp<2000 and bool(struct.unpack_from('<I',data,80)[0])
+
     def read(self):
         if not self.view:
             self.handle=self.kernel.OpenFileMappingW(4,False,r'Local\L4D2MinecraftRenderPose')
@@ -479,26 +488,32 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                 map_ready = False
                 last_world_request = 0.0
                 last_reply_frame = None
+                was_host_menu = False
                 while True:
                     host_fresh = False
                     try:
                         sample=source.read()
                         if sample is not None:
                             host_fresh = True
-                            if guest_map != sample['map']:
-                                guest_map=sample['map'];map_ready=False
+                            session=(sample['map'],sample.get('epoch',0))
+                            if guest_map != session:
+                                guest_map=session;map_ready=False
                                 collision.cells.clear()
+                                gameplay.events.clear();gameplay.mobs.clear();gameplay.physics.clear();gameplay.projectiles.clear()
+                                gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[]
+                                last_frame=None;last_render=None
                                 last_world_request=0.0
                             if time.monotonic()-last_world_request>1.0:
-                                await socket.send(json.dumps({'t':'world','map':guest_map}))
+                                await socket.send(json.dumps({'t':'world','map':guest_map[0],'epoch':guest_map[1]}))
                                 last_world_request=time.monotonic()
                             pose = camera(sample, args.width / args.height)
                             actual=render.read()
                             pose = render_camera(pose, actual, last_render)
                             if 'render_sequence' in pose:
                                 last_render = pose
-                            pose['fp'] = host_input.perspective==0
-                            identity = (sample["map"], sample["f"], pose.get('render_sequence'))
+                            pose['visible']=bool(sample.get('visible',True)) and map_ready
+                            pose['fp'] = host_input.perspective==0 and not sample.get('pinned',False)
+                            identity = (sample["map"], sample.get("epoch",0), map_ready, sample["f"], pose.get('render_sequence'))
                             if identity != last_frame:
                                 memory.publish(pose)
                                 await socket.send(json.dumps(pose))
@@ -513,6 +528,8 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                     next_sync = time.monotonic()+2
                                 pose_surface = surface(sample)
                                 await socket.send(json.dumps({'t':'surface','hit':pose_surface}))
+                                if 'health' in sample:
+                                    await socket.send(json.dumps({'t':'hosthealth','h':sample['health']}))
                                 if 'actors' in sample:
                                     await socket.send(json.dumps({'t':'peds','p':sample['actors']}))
                                 if sample.get('physground'):
@@ -529,7 +546,12 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                     last_wheel=wheel
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
-                    inputs.enabled = map_ready and host_fresh and bool(sample.get("visible",True)) and frames.fresh(3.0)
+                    host_menu=render.menu_open()
+                    if host_menu and not was_host_menu:
+                        await socket.send(json.dumps({'t':'key','k':'escape','down':True}))
+                        inputs.gui_open=False
+                    was_host_menu=host_menu
+                    inputs.enabled = not host_menu and map_ready and host_fresh and bool(sample.get("visible",True)) and frames.fresh(3.0)
                     host_input.controls(inputs.enabled)
                     gui_enabled = inputs.gui_open and inputs.enabled
                     host_input.set_gui(gui_enabled)
@@ -552,10 +574,10 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                             gameplay.apply(event)
                             if event.get('t') == 'syncdone' and event.get('id') == sync_id:
                                 synced = True
-                            if event.get('t') == 'mapready' and event.get('map')==guest_map:
+                            if event.get('t') == 'mapready' and guest_map is not None and event.get('map')==guest_map[0] and event.get('epoch',0)==guest_map[1]:
                                 map_ready=bool(event.get('ready'))
                             if event.get('t') == 'ui':
-                                inputs.gui_open = bool(event.get('open'))
+                                inputs.gui_open = bool(event.get('open')) and not host_menu
                         except (ValueError, TypeError):
                             pass
                         args.events.parent.mkdir(parents=True, exist_ok=True)

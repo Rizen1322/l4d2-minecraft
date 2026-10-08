@@ -89,7 +89,7 @@ public final class HostLink extends WebSocketServer {
 					Minecraft minecraft = Minecraft.getInstance();
 					minecraft.execute(() -> ClientInput.releaseRelay(minecraft));
 				}
-				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString());
+				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString(),m.has("epoch")?m.get("epoch").getAsLong():0);
                 case "cam" -> HostState.update(m);
 				case "surface" -> HostState.surface(m);
                 case "physground" -> HostTerrain.update(m.getAsJsonArray("p"));
@@ -115,7 +115,12 @@ public final class HostLink extends WebSocketServer {
 
 					MobWar.peds(flat);
 				}
-				case "equipmenthit" -> dev.rehan.passthrough.SurvivalFeatures.equipmentHit(m.get("d").getAsInt(),m.get("shield").getAsBoolean());
+				case "navpath" -> dev.rehan.passthrough.HostNavigation.reply(m);
+                case "mobpos" -> {
+                    var p=m.getAsJsonArray("p");HostTerrain.recover(m.get("id").getAsInt(),p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble());
+                }
+                case "hosthealth" -> dev.rehan.passthrough.SurvivalFeatures.hostHealth(m.getAsJsonArray("h"));
+                case "equipmenthit" -> dev.rehan.passthrough.SurvivalFeatures.equipmentHit(m.get("d").getAsInt(),m.get("shield").getAsBoolean());
                 case "supply" -> {
                     JsonArray p=m.getAsJsonArray("pos");dev.rehan.passthrough.SurvivalFeatures.supply(p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble(),m.get("kind").getAsInt());
                 }

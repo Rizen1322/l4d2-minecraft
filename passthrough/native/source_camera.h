@@ -28,6 +28,20 @@ inline bool gameplay_visible() {
     using Flag=bool(__thiscall*)(void*);
     return reinterpret_cast<Flag>(table[26])(engine) && !reinterpret_cast<Flag>(table[28])(engine);
 }
+// VEngineVGui001: destructor, GetPanel, IsGameUIVisible (slot 2).
+// Valve public ienginevgui.h and the L4D2 SDK EngineVGui.h agree on these slots.
+inline bool menu_visible() {
+    static void* vgui=nullptr;
+    if(!vgui) {
+        auto module=GetModuleHandleW(L"engine.dll");
+        auto factory=module?reinterpret_cast<void*(__cdecl*)(const char*,int*)>(GetProcAddress(module,"CreateInterface")):nullptr;
+        vgui=factory?factory("VEngineVGui001",nullptr):nullptr;
+    }
+    if(!readable(vgui,sizeof(void*)))return false;
+    auto table=*reinterpret_cast<void***>(vgui);
+    if(!readable(table,3*sizeof(void*)))return false;
+    return reinterpret_cast<bool(__thiscall*)(void*)>(table[2])(vgui);
+}
 inline bool read(Sample& s) {
     static void* engine=nullptr;
     if (!engine) {
@@ -78,7 +92,8 @@ inline void publish_visibility(bool ready) {
     static uint8_t* data=map?static_cast<uint8_t*>(MapViewOfFile(map,FILE_MAP_WRITE,0,0,128)):nullptr;
     if(!data)return;
     uint32_t flag=ready?1:0;uint64_t stamp=GetTickCount64();
-    std::memcpy(data+64,&flag,sizeof(flag));MemoryBarrier();std::memcpy(data+72,&stamp,sizeof(stamp));
+    uint32_t menu=menu_visible()?1:0;
+    std::memcpy(data+80,&menu,sizeof(menu));std::memcpy(data+64,&flag,sizeof(flag));MemoryBarrier();std::memcpy(data+72,&stamp,sizeof(stamp));
 }
 inline void publish(const Sample& s) {
     static HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,128,L"Local\\L4D2MinecraftRenderPose");
