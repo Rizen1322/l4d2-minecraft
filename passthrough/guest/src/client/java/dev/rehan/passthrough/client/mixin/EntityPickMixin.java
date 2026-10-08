@@ -22,7 +22,7 @@ abstract class EntityPickMixin {
 	@Inject(method = "pick(DFZ)Lnet/minecraft/world/phys/HitResult;", at = @At("HEAD"), cancellable = true)
 	private void passthrough$cameraRay(final double range, final float a, final boolean withLiquids, final CallbackInfoReturnable<HitResult> cir) {
 		HostState.Pose p = HostState.frame();
-		if (p == null || p.firstPerson() || !((Object) this instanceof LocalPlayer self)) {
+		if (p == null || !((Object) this instanceof LocalPlayer self)) {
 			return;
 		}
 
@@ -33,6 +33,20 @@ abstract class EntityPickMixin {
 		Vec3 start = from.add(dir.scale(Math.max(0.0, along - 0.4)));
 		Vec3 end = from.add(dir.scale(along + range));
 		ClipContext.Fluid fluid = withLiquids ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE;
-		cir.setReturnValue(self.level().clip(new ClipContext(start, end, ClipContext.Block.OUTLINE, fluid, self)));
+		HitResult minecraftHit=self.level().clip(new ClipContext(start, end, ClipContext.Block.OUTLINE, fluid, self));
+        HostState.Surface support=HostState.surface();
+        Vec3 supportDelta=support==null?Vec3.ZERO:support.pos().subtract(from);
+        double supportAlong=supportDelta.dot(dir);
+        // Reject a stale trace after camera turns or view punch. A Source trace
+        // stops just before its brush, hence a small positional tolerance.
+        boolean onRay=supportAlong>0 && supportDelta.subtract(dir.scale(supportAlong)).lengthSqr()<0.01;
+        if (support != null && onRay && from.distanceToSqr(support.pos())<=range*range
+                && (minecraftHit.getType()==HitResult.Type.MISS || from.distanceToSqr(support.pos())<from.distanceToSqr(minecraftHit.getLocation()))
+                && self.level().getBlockState(support.cell()).canBeReplaced()) {
+            // Click an AIR cell outside the real Source surface. BlockItem naturally
+            // replaces that cell instead of needing a saved invisible support block.
+            minecraftHit=new net.minecraft.world.phys.BlockHitResult(support.pos(),support.face(),support.cell(),false);
+        }
+        cir.setReturnValue(minecraftHit);
 	}
 }

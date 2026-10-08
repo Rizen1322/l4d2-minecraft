@@ -24,6 +24,23 @@ public final class HostState {
 	) {
 	}
 
+    public record Surface(net.minecraft.world.phys.Vec3 pos, net.minecraft.core.BlockPos cell,
+                          net.minecraft.core.Direction face, long received) {}
+    private static volatile Surface surface;
+    static void surface(final JsonObject m) {
+        if (!m.has("hit") || m.get("hit").isJsonNull()) { surface=null; return; }
+        JsonObject h=m.getAsJsonObject("hit");
+        JsonArray p=h.getAsJsonArray("pos"), c=h.getAsJsonArray("cell");
+        net.minecraft.core.Direction[] faces={net.minecraft.core.Direction.WEST,net.minecraft.core.Direction.EAST,
+            net.minecraft.core.Direction.DOWN,net.minecraft.core.Direction.UP,net.minecraft.core.Direction.NORTH,net.minecraft.core.Direction.SOUTH};
+        surface=new Surface(new net.minecraft.world.phys.Vec3(p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble()),
+            new net.minecraft.core.BlockPos(c.get(0).getAsInt(),c.get(1).getAsInt(),c.get(2).getAsInt()),faces[h.get("face").getAsInt()],System.nanoTime());
+    }
+    public static Surface surface() {
+        Surface s=surface;
+        return s!=null && System.nanoTime()-s.received()<250_000_000L ? s : null;
+    }
+
 	private static final long TIMEOUT_NANOS = 2_000_000_000L;
 	private static volatile Pose latest;
 	/** The pose this frame renders with, taken once per frame so every hook agrees. Render thread only. */

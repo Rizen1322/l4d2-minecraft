@@ -20,6 +20,7 @@ uniform float2 HostPlanes = float2(7.0, 30000.0);
 // Set true by the add-on only while it has uploaded a Minecraft frame; until then L4D2 passes through untouched.
 uniform bool McActive = false;
 
+uniform bool HostOcclusion = true;
 uniform bool HostReversedZ < ui_label = "L4D2 depth is reversed"; > = false;
 uniform float DepthBias < ui_type = "drag"; ui_min = 0.0; ui_max = 1.0; ui_step = 0.005; ui_label = "Depth bias (m)";
 	ui_tooltip = "How far behind L4D2's surface Minecraft may still show (blocks resting on the ground)."; > = 0.04;
@@ -134,6 +135,39 @@ float3 bands(float z)
 	return lerp(float3(0.1, 0.1, 0.1), float3(1.0, 0.85, 0.3), step(0.5, t)) * saturate(1.5 - z / 100.0);
 }
 
+// Track the surface already visible along the rotated guest ray before
+// searching arbitrary distances. Sparse depth marching can skip a nearby
+// cube completely when even a small camera translation changes its silhouette.
+bool track_surface(float3 rotatedRay, float seed, float2 uv,
+    out float2 candidate, out float hostDepth)
+{
+    const float2 scale=float2(WarpTan.y*WarpTan.z,WarpTan.y);
+    candidate=0;hostDepth=1e9;
+    float z=seed;
+    [loop] for(int k=0;k<12;++k) {
+        float3 p=rotatedRay*z+WarpT;
+        if(p.z>=-0.001) return false;
+        float2 ndc=p.xy/-p.z/scale;
+        if(any(abs(ndc)>1)) return false;
+        candidate=ndc*.5+.5;
+        float depth=mc_linear(tex2Dlod(sDepth,float4(candidate,0,0)).r);
+        if(depth>1e8) return false;
+        z=(depth+WarpT.z)/max(-rotatedRay.z,0.000001);
+    }
+    float depth=mc_linear(tex2Dlod(sDepth,float4(candidate,0,0)).r);
+    if(depth>1e8 || tex2Dlod(sWorld,float4(candidate,0,0)).a<0.005) return false;
+    float3 q=float3((candidate*2-1)*scale,-1)*depth-WarpT;
+    float3 hp=float3(dot(q,float3(WarpRow0.x,WarpRow1.x,WarpRow2.x)),
+        dot(q,float3(WarpRow0.y,WarpRow1.y,WarpRow2.y)),
+        dot(q,float3(WarpRow0.z,WarpRow1.z,WarpRow2.z)));
+    if(hp.z>=-0.01) return false;
+    float2 ndc=hp.xy/-hp.z/float2(WarpTan.x*BUFFER_WIDTH*BUFFER_RCP_HEIGHT,WarpTan.x);
+    float2 error=(ndc-float2(uv.x*2-1,1-uv.y*2))*float2(BUFFER_WIDTH,BUFFER_HEIGHT)*.5;
+    if(any(abs(error)>1.5)) return false;
+    hostDepth=-hp.z;
+    return true;
+}
+
 void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 outColor : SV_Target0, out float4 outInfo : SV_Target1)
 {
 	const float3 host = tex2D(ReShade::BackBuffer, uv).rgb;
@@ -143,25 +177,55 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 		return;
 	const float2 ouv = float2(uv.x, 1.0 - uv.y); // Minecraft's rows are bottom-up
 
+    if (!HostOcclusion) {
+        // True raw-color diagnostic: independent of BOTH depth buffers.
+        float4 raw=tex2D(sWorld,ouv);
+        outColor=float4(raw.rgb+host*(1-raw.a),1);
+        outInfo=float4(raw.a,1,400,0);
+        return;
+    }
+
 	// Where this L4D2 pixel's view ray lands in Minecraft's frame.
 	float2 muv = ouv;
 	bool inside = true;
-	const float zh = host_linear(tex2Dlod(ReShade::DepthBuffer, float4(uv, 0, 0)).x);
+	const float zh = HostOcclusion ? host_linear(tex2Dlod(ReShade::DepthBuffer, float4(uv, 0, 0)).x) : 400.0;
 	// how far behind L4D2's surface Minecraft may still show: more where that surface is seen at a grazing angle
 	const float allow = min(DepthBias + SlopeBias * abs(ddy(zh)), max(MaxBias, DepthBias));
 	float zm = 1e9;
-	if (Reproject)
-	{
+    const bool doWarp = Reproject && HostOcclusion; // Diagnostic bypass uses the untouched guest image.
+    const float3 hostRay=float3((uv.x*2-1)*WarpTan.x*BUFFER_WIDTH*BUFFER_RCP_HEIGHT,(1-uv.y*2)*WarpTan.x,-1);
+    const float3 rotatedRay=float3(dot(WarpRow0,hostRay),dot(WarpRow1,hostRay),dot(WarpRow2,hostRay));
+    // Same eye position: rotation has an exact inverse projection. Ray marching
+    // can miss a whole surface and is unnecessary in this common case.
+    if (doWarp && dot(WarpT,WarpT)<0.000001) {
+        float2 ndc=rotatedRay.xy/max(-rotatedRay.z,0.000001)/float2(WarpTan.y*WarpTan.z,WarpTan.y);
+        muv=ndc*.5+.5;
+        inside=rotatedRay.z<0 && all(abs(ndc)<=1);
+        zm=mc_linear(tex2Dlod(sDepth,float4(muv,0,0)).r)/max(-rotatedRay.z,0.000001);
+    }
+    else if (doWarp)
+    {
 		// March this L4D2 pixel's ray (in L4D2's current camera) from near to far, moving each point into the
 		// camera Minecraft rendered with (rotation + how far the camera moved since). The first point that is
 		// behind Minecraft's surface there is where Minecraft is seen: refine it and sample. Thin, close things
 		// (Steve in third person) are found even when the camera has swung sideways.
 		const float3 ray = float3((uv.x * 2.0 - 1.0) * WarpTan.x * BUFFER_WIDTH * BUFFER_RCP_HEIGHT, (1.0 - uv.y * 2.0) * WarpTan.x, -1.0);
 		const float2 mcScale = float2(WarpTan.y * WarpTan.z, WarpTan.y);
-		const float zNear = 0.2, zFar = max(min(zh + allow, 400.0), 0.5);
+		const float zNear = 0.2;
 		float2 ndc = 0.0;
-		inside = false;
-		[loop] for (int i = 0; i < 24; ++i)
+        float2 rotatedNdc=rotatedRay.xy/max(-rotatedRay.z,0.000001)/mcScale;
+        float seedDepth=mc_linear(tex2Dlod(sDepth,float4(rotatedNdc*.5+.5,0,0)).r);
+        inside=rotatedRay.z<0 && all(abs(rotatedNdc)<=1) && seedDepth<1e8;
+        if(inside) inside=track_surface(rotatedRay,(seedDepth+WarpT.z)/-rotatedRay.z,uv,muv,zm);
+        const bool tracked=inside;
+        const float2 trackedUv=muv;
+        const float trackedDepth=zm;
+        // A valid correspondence can still be a BACKGROUND surface. Search
+        // nearer depths first; the tracked hit is the stable fallback, not an
+        // excuse to bypass guest-versus-guest visibility ordering.
+        const float zFar=max(min(min(zh+allow,400.0),tracked?trackedDepth:400.0),0.5);
+        inside=false;
+		[loop] for (int i = 0; i < 24 && !inside; ++i)
 		{
 			const float z = zNear * pow(zFar / zNear, i / 23.0);
 			const float3 p = ray * z;
@@ -177,7 +241,7 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 			// crossed Minecraft's surface: settle on it (fixed-point on the surface point's L4D2 depth)
 			float zg = z;
 			ndc = n;
-			[loop] for (int k = 0; k < 3; ++k)
+			[loop] for (int k = 0; k < 12; ++k)
 			{
 				const float3 pk = ray * zg;
 				const float3 mk = float3(dot(WarpRow0, pk), dot(WarpRow1, pk), dot(WarpRow2, pk)) + WarpT;
@@ -191,16 +255,33 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 					break;
 				ndc = nk;
 				const float3 q = float3(nk * mcScale, -1.0) * zk - WarpT;
-				zg = -(q.x * WarpRow0.z + q.y * WarpRow1.z + q.z * WarpRow2.z);
+				// Solve the sampled depth along the HOST ray directly. Back-projecting
+                // an off-ray sample first couples x/y error into depth and can
+                // oscillate between foreground/background surfaces.
+                zg = (zk + WarpT.z) / max(-rotatedRay.z,0.000001);
 			}
-			muv = ndc * 0.5 + 0.5;
-			zm = zg;
-			inside = true;
-			break;
+            // A depth discontinuity can make refinement jump to another block.
+            // Accept only a surface point that projects back to THIS host pixel;
+            // otherwise it produces the duplicate/floating cubes seen on turns.
+            float2 candidate = ndc * 0.5 + 0.5;
+            float depth = mc_linear(tex2Dlod(sDepth, float4(candidate,0,0)).r);
+            float3 q = float3(ndc * mcScale,-1.0) * depth - WarpT;
+            float3 hostPoint = float3(dot(q,float3(WarpRow0.x,WarpRow1.x,WarpRow2.x)),
+                dot(q,float3(WarpRow0.y,WarpRow1.y,WarpRow2.y)),
+                dot(q,float3(WarpRow0.z,WarpRow1.z,WarpRow2.z)));
+            if (depth>1e8 || hostPoint.z>=-0.01 || tex2Dlod(sWorld,float4(candidate,0,0)).a<0.005) continue;
+            float2 hostNdc=hostPoint.xy / -hostPoint.z / float2(WarpTan.x * BUFFER_WIDTH * BUFFER_RCP_HEIGHT,WarpTan.x);
+            float2 errorPixels=(hostNdc-float2(uv.x*2-1,1-uv.y*2))*float2(BUFFER_WIDTH,BUFFER_HEIGHT)*0.5;
+            if (any(abs(errorPixels)>1.5)) continue;
+            muv=candidate;
+            zm=-hostPoint.z;
+            inside=true;
+            break;
 		}
+        if(!inside && tracked) {muv=trackedUv;zm=trackedDepth;inside=true;}
 	}
 	const float4 world = inside ? tex2D(sWorld, muv) : 0.0;
-	if (!Reproject)
+	if (!doWarp)
 		zm = mc_linear(tex2D(sDepth, muv).r);
 
 	outInfo = float4(0.0, 0.0, zh, 0.0);

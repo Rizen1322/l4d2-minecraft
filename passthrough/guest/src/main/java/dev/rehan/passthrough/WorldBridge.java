@@ -40,6 +40,7 @@ public final class WorldBridge {
 	}
 
 	static void detach() {
+		saveMigration();
 		server = null;
 		barriers.clear();
 	}
@@ -99,6 +100,50 @@ public final class WorldBridge {
 		});
 	}
 
+    private static final java.util.Set<String> migrated = new java.util.HashSet<>();
+    private static MinecraftServer migrationServer;
+    private static java.nio.file.Path migrationFile;
+    private static boolean migrationDirty;
+    private static int migrationTicks;
+    private static void saveMigration() {
+        if (!migrationDirty || migrationFile==null) return;
+        try {
+            var temporary=migrationFile.resolveSibling("l4d2mc-support-migration-v1.tmp");
+            java.nio.file.Files.write(temporary,migrated);
+            java.nio.file.Files.move(temporary,migrationFile,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            migrationDirty=false;
+        } catch(java.io.IOException error) { Passthrough.LOG.warn("Cannot save support migration",error); }
+    }
+    /** Migration confined to our dedicated guest world: remove old bridge barriers on chunk load. */
+    static void cleanLegacySupports(final ServerLevel level, final net.minecraft.world.level.chunk.LevelChunk chunk) {
+        var root=level.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).normalize();
+        if (!root.getFileName().toString().equals("l4d2mc-guest") || level.dimension()!=net.minecraft.world.level.Level.OVERWORLD) return;
+        if (migrationServer!=level.getServer()) {
+            migrationServer=level.getServer();migrated.clear();migrationDirty=false;
+            migrationFile=root.resolve("l4d2mc-support-migration-v1.txt");
+            try { if(java.nio.file.Files.exists(migrationFile)) migrated.addAll(java.nio.file.Files.readAllLines(migrationFile)); }
+            catch(java.io.IOException error) { Passthrough.LOG.warn("Cannot read support migration",error);return; }
+        }
+        String key=chunk.getPos().x()+" "+chunk.getPos().z();
+        if (migrated.contains(key)) return;
+        placingGround=true;
+        try {
+            var sections=chunk.getSections();
+            BlockPos.MutableBlockPos pos=new BlockPos.MutableBlockPos();
+            for (int section=0;section<sections.length;section++) {
+                var data=sections[section];
+                if (!data.maybeHas(state -> state.is(Blocks.BARRIER))) continue;
+                int baseY=level.getMinY()+section*16;
+                for (int x=0;x<16;x++) for (int y=0;y<16;y++) for (int z=0;z<16;z++) {
+                    if (!data.getBlockState(x,y,z).is(Blocks.BARRIER)) continue;
+                    pos.set(chunk.getPos().getMinBlockX()+x,baseY+y,chunk.getPos().getMinBlockZ()+z);
+                    chunk.setBlockState(pos,Blocks.AIR.defaultBlockState(),Block.UPDATE_KNOWN_SHAPE);
+                }
+            }
+        } finally { placingGround=false; }
+        migrated.add(key);migrationDirty=true;
+    }
+
 	/** Run a command as the server (op). Results go to the log, not to chat (send_command_feedback is off). */
 	public static void command(final String command) {
 		MinecraftServer s = server;
@@ -123,6 +168,7 @@ public final class WorldBridge {
 	/** Every server tick: block changes, and projectiles in flight for the host to trace through its own world. */
 	static void tick(final MinecraftServer s) {
 		flush(s);
+        if (++migrationTicks%100==0) saveMigration();
 		if (Passthrough.active) {
 			reportProjectiles(s.overworld());
 		}

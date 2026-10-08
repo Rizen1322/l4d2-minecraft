@@ -80,7 +80,8 @@ public final class HostLink extends WebSocketServer {
 					minecraft.execute(() -> ClientInput.releaseRelay(minecraft));
 				}
 				case "cam" -> HostState.update(m);
-				case "ground" -> WorldBridge.solid(ints(m.getAsJsonArray("c")));
+				case "surface" -> HostState.surface(m);
+                case "ground" -> {} // Retired: Source supports are virtual, never world blocks.
 				case "clear" -> WorldBridge.clearSolid();
 				case "cmd" -> WorldBridge.command(m.get("c").getAsString());
 				case "gta", "gtastate", "gtainfo", "director" -> this.relay(conn, message);

@@ -54,7 +54,7 @@ final class ClientInput {
 				String k = m.get("k").getAsString();
 				boolean down = !m.has("down") || m.get("down").getAsBoolean();
 					if (k.equals("escape")) {
-					if (down && minecraft.gui.screen() != null) {
+					if (down && player != null && minecraft.gui.screen() != null) {
 						minecraft.gui.screen().onClose();
 					}
 

@@ -1,3 +1,6 @@
+#include <cstdio>
+#include <algorithm>
+#include "source_camera.h"
 #include "compositor.h"
 #include <windows.h>
 #include <algorithm>
@@ -52,6 +55,7 @@ namespace
 	DWORD g_nextOpenAttempt = 0;
 	ULONGLONG g_lastNewFrame = 0;
 	bool g_guestUiOpen = false;
+    uint32_t g_debugMode = 0;
 	int g_cursorShows = 0;
 
 	struct Layer
@@ -60,6 +64,7 @@ namespace
 		resource_view srv = {0};
 	};
 	Layer g_world, g_depth, g_overlay;
+    Layer g_worldBack, g_depthBack, g_overlayBack;
 	uint32_t g_width = 0, g_height = 0;
 	bool g_hasFrame = false;
 	float g_mcNear = 0.05f, g_mcFar = 2048.0f;
@@ -134,7 +139,7 @@ namespace
 
 	void destroy_layers(device *dev)
 	{
-		for (Layer *layer : {&g_world, &g_depth, &g_overlay})
+		for (Layer *layer : {&g_world, &g_depth, &g_overlay, &g_worldBack, &g_depthBack, &g_overlayBack})
 		{
 			if (layer->srv.handle != 0)
 				dev->destroy_resource_view(layer->srv);
@@ -149,10 +154,17 @@ namespace
 	bool create_layer(device *dev, Layer &layer, uint32_t w, uint32_t h, format fmt)
 	{
 		if (!dev->create_resource(
-				resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::shader_resource | resource_usage::copy_dest),
+				resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::shader_resource, resource_flags::dynamic),
 				nullptr, resource_usage::shader_resource, &layer.tex))
-			return false;
-		return dev->create_resource_view(layer.tex, resource_usage::shader_resource, resource_view_desc(fmt), &layer.srv);
+        {
+            static DWORD nextLog=0;
+            if(GetTickCount()>nextLog){char message[100];std::snprintf(message,sizeof(message),"MC texture creation failed: format=%u size=%ux%u",unsigned(fmt),w,h);reshade::log::message(reshade::log::level::error,message);nextLog=GetTickCount()+5000;}
+            return false;
+        }
+        if (!dev->create_resource_view(layer.tex,resource_usage::shader_resource,resource_view_desc(fmt),&layer.srv)) {
+            reshade::log::message(reshade::log::level::error,"MC texture view creation failed");return false;
+        }
+        return true;
 	}
 
 	void bind(effect_runtime *runtime)
@@ -171,7 +183,11 @@ namespace
 		const int32_t slot = read<int32_t>(g_view + 40);
 		if (slot < 0 || slot >= g_slots)
 			return;
-		const uint8_t *desc = g_view + kSlotDesc + kSlotDescBytes * slot;
+		const uint8_t *sharedDesc = g_view + kSlotDesc + kSlotDescBytes * slot;
+        uint8_t descriptor[kSlotDescBytes];
+        MemoryBarrier();
+        std::memcpy(descriptor, sharedDesc, sizeof(descriptor));
+        const uint8_t *desc = descriptor;
 		const int64_t seq = read<int64_t>(desc);
 		if (seq & 1)
 			return;
@@ -184,7 +200,10 @@ namespace
 			destroy_layers(dev);
 			if (!create_layer(dev, g_world, w, h, format::r8g8b8a8_unorm) ||
 				!create_layer(dev, g_depth, w, h, format::r32_float) ||
-				!create_layer(dev, g_overlay, w, h, format::r8g8b8a8_unorm))
+				!create_layer(dev, g_overlay, w, h, format::r8g8b8a8_unorm) ||
+                !create_layer(dev,g_worldBack,w,h,format::r8g8b8a8_unorm) ||
+                !create_layer(dev,g_depthBack,w,h,format::r32_float) ||
+                !create_layer(dev,g_overlayBack,w,h,format::r8g8b8a8_unorm))
 			{
 				destroy_layers(dev);
 				return;
@@ -198,20 +217,36 @@ namespace
 		static std::vector<uint8_t> snapshot;
 		snapshot.resize(layer * 3);
 		std::memcpy(snapshot.data(), base, snapshot.size());
-		if (read<int64_t>(desc) != seq)
+		MemoryBarrier();
+        if (read<int64_t>(sharedDesc) != seq)
 			return;
 		base = snapshot.data();
-		subresource_data data;
-		data.row_pitch = w * 4;
-		data.slice_pitch = static_cast<uint32_t>(layer);
-		data.data = const_cast<uint8_t *>(base);
-		dev->update_texture_region(data, g_world.tex, 0);
-		data.data = const_cast<uint8_t *>(base + layer);
-		dev->update_texture_region(data, g_depth.tex, 0);
-		data.data = const_cast<uint8_t *>(base + 2 * layer);
-		dev->update_texture_region(data, g_overlay.tex, 0);
-		if (read<int64_t>(desc) != seq)
-			return; // Minecraft rewrote the slot mid-copy: show the next one instead
+        auto stream = [&](Layer& layer,const uint8_t* pixels,bool rgba) {
+            subresource_data mapped{};
+            if (!dev->map_texture_region(layer.tex,0,nullptr,map_access::write_discard,&mapped)) return false;
+            for(uint32_t y=0;y<h;y++) {
+                auto dst=static_cast<uint8_t*>(mapped.data)+size_t(y)*mapped.row_pitch;
+                const auto src=pixels+size_t(y)*w*4;
+                if (rgba) {
+                    auto input=reinterpret_cast<const uint32_t*>(src);
+                    auto output=reinterpret_cast<uint32_t*>(dst);
+                    // Source's D3D9 texture is A8R8G8B8; guest bytes are RGBA.
+                    for(uint32_t x=0;x<w;x++){uint32_t c=input[x];output[x]=(c&0xff00ff00)|((c&0xff)<<16)|((c>>16)&0xff);}
+                } else std::memcpy(dst,src,size_t(w)*4);
+            }
+            dev->unmap_texture_region(layer.tex,0);
+            return true;
+        };
+        if (!stream(g_worldBack,base,true) || !stream(g_depthBack,base+layer,false) || !stream(g_overlayBack,base+2*layer,true)) {
+            static DWORD nextLog=0;
+            if(GetTickCount()>nextLog){reshade::log::message(reshade::log::level::warning,"MC frame upload failed; retaining previous complete frame");nextLog=GetTickCount()+5000;}
+            return;
+        }
+        std::swap(g_world,g_worldBack);std::swap(g_depth,g_depthBack);std::swap(g_overlay,g_overlayBack);
+        bind(runtime);
+
+        // Texture bytes and metadata came from the same accepted snapshot.
+        // Never reject after upload: that would leave new pixels with an old pose.
 		g_lastPublish = published;
 		g_lastNewFrame = GetTickCount64();
 		g_mcNear = read<float>(desc + 32);
@@ -278,10 +313,12 @@ namespace
 		next = GetTickCount() + 1000;
 		if (path[0] == 0)
 		{
-			GetModuleFileNameW(nullptr, path, MAX_PATH);
+			HMODULE addon=nullptr;
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,reinterpret_cast<LPCWSTR>(&watch_effect_file),&addon);
+            GetModuleFileNameW(addon, path, MAX_PATH);
 			wchar_t *slash = wcsrchr(path, L'\\');
 			if (slash)
-				wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - path), L"reshade-shaders\\Shaders\\L4D2Minecraft.fx");
+				wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - path), L"shaders\\L4D2Minecraft.fx");
 		}
 		WIN32_FILE_ATTRIBUTE_DATA info;
 		if (!GetFileAttributesExW(path, GetFileExInfoStandard, &info))
@@ -293,7 +330,7 @@ namespace
 
 	void on_present(effect_runtime *runtime)
 	{
-		// Shader reload is managed by ReShade.
+		watch_effect_file(runtime);
 		if (g_guestUiOpen && g_active && GetTickCount64() - g_lastNewFrame < 500 &&
 			GetForegroundWindow() == runtime->get_hwnd())
 		{
@@ -324,6 +361,10 @@ namespace
 		// Minecraft frame is here. (Toggling techniques from inside this callback crashes ReShade.)
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McActive"); v.handle != 0)
 			runtime->set_uniform_value_bool(v, on);
+        if (const auto v=find_uniform(runtime,kEffect,"DebugView");v.handle) runtime->set_uniform_value_int(v,g_debugMode<=3?int(g_debugMode):0);
+        if (const auto v=find_uniform(runtime,kEffect,"HostOcclusion");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=4);
+        if (const auto v=find_uniform(runtime,kEffect,"Reproject");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=5);
+
 		if (!on)
 			return;
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McPlanes"); v.handle != 0)
@@ -405,6 +446,8 @@ namespace
 
 	void read_host_pose()
 	{
+        static uint64_t lastAccepted=0;
+        if(GetTickCount64()-lastAccepted>=500) compositor::set_active(false);
 		static HANDLE mapping = nullptr;
 		static const uint8_t *view = nullptr;
 		if (!view) {
@@ -413,15 +456,38 @@ namespace
 		}
 		if (!view) { compositor::set_active(false); return; }
 		const uint32_t seq = read<uint32_t>(view + 4);
-		if ((seq & 1) || read<uint32_t>(view) != 0x50434D4C) { compositor::set_active(false); return; }
+		if ((seq & 1) || read<uint32_t>(view) != 0x50434D4C) return; // Hold the last complete pose across an in-progress write.
 		const uint64_t timestamp = read<uint64_t>(view + 8);
 		g_guestUiOpen = read<uint32_t>(view + 64) != 0;
+        g_debugMode = read<uint32_t>(view + 68);
 		const double x = read<double>(view+16), y = read<double>(view+24), z = read<double>(view+32);
 		const float yaw = read<float>(view+40), pitch = read<float>(view+44), roll = read<float>(view+48), fov = read<float>(view+52);
 		if (read<uint32_t>(view+4) != seq) return;
 		const bool fresh = GetTickCount64() >= timestamp && GetTickCount64() - timestamp < 500;
 		compositor::set_active(fresh);
-		if (fresh) compositor::set_host_pose(yaw,pitch,roll,fov,x,y,z);
+        if(fresh) lastAccepted=timestamp;
+		if (fresh) {
+            source_camera::Sample actual{};
+            static source_camera::Sample lastCamera{};
+            static bool haveCamera=false;
+            const bool readCamera=source_camera::read(actual);
+            const double dx=actual.x-x,dy=actual.y-y,dz=actual.z-z;
+            // Engine matrices can briefly describe a distant auxiliary view.
+            // Cross-check against the independently validated player eye before
+            // publishing it to Minecraft or using it for reprojection.
+            if (readCamera && dx*dx+dy*dy+dz*dz<=64.0) {
+                lastCamera=actual;haveCamera=true;
+            } else if(haveCamera) {
+                actual=lastCamera;
+                actual.x=x;actual.y=y;actual.z=z;
+                actual.yaw=yaw;actual.pitch=pitch;actual.roll=roll;
+            }
+            if (haveCamera) {
+                source_camera::publish(actual);
+                compositor::set_host_planes(actual.nearPlane,actual.farPlane);
+                compositor::set_host_pose(actual.yaw,actual.pitch,actual.roll,actual.fov,actual.x,actual.y,actual.z);
+            } else compositor::set_host_pose(yaw,pitch,roll,fov,x,y,z);
+        }
 	}
 
 	void on_reloaded_effects(effect_runtime *runtime)

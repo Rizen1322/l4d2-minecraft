@@ -53,7 +53,7 @@ def host(manifest):
         f"EffectSearchPaths={shader_dir}\n"
         f"PresetPath={preset}\n"
         "PerformanceMode=0\n"
-        "[DEPTH]\nDepthCopyBeforeClears=1\nDepthCopyAtClearIndex=0\n", encoding="utf-8")
+        "[DEPTH]\nDepthCopyBeforeClears=1\nDepthCopyAtClearIndex=2\nUseAspectRatioHeuristics=3\n", encoding="utf-8")
     (staging / "preset.ini").write_text(
         "Techniques=MCPassthrough@L4D2Minecraft.fx\n"
         "TechniqueSorting=MCPassthrough@L4D2Minecraft.fx\n"

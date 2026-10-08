@@ -149,6 +149,38 @@ class FrameHeartbeat:
             self.kernel.CloseHandle(self.handle)
 
 
+class RenderPose(FrameHeartbeat):
+    def read(self):
+        if not self.view:
+            self.handle=self.kernel.OpenFileMappingW(4,False,r'Local\L4D2MinecraftRenderPose')
+            if self.handle:
+                self.view=self.kernel.MapViewOfFile(self.handle,4,0,0,128)
+        if not self.view:
+            return None
+        data=ctypes.string_at(self.view,64)
+        magic,seq,stamp,x,y,z,yaw,pitch,roll,fov=struct.unpack_from(POSE_FORMAT,data)
+        after=ctypes.c_uint32.from_address(self.view+4).value
+        self.kernel.GetTickCount64.restype=ctypes.c_ulonglong
+        if magic!=0x50434D4C or seq&1 or after!=seq or not 0<=self.kernel.GetTickCount64()-stamp<100:
+            return None
+        return {'p':[x,y,z],'r':[yaw,pitch,roll],'fov':fov,'render_sequence':seq}
+
+
+def render_camera(pose, actual, previous=None):
+    """Accept the player view, never Source's distant auxiliary render camera.
+
+    Eight Minecraft units allow local view bob and the usual third-person
+    offset. VScript's eye position stays authoritative across real teleports.
+    Keep the last measured FOV on rejection so calibration does not flicker.
+    """
+    result = dict(pose)
+    if actual and all(math.isfinite(v) for v in actual['p']) and math.dist(actual['p'], pose['p']) <= 8:
+        result.update(actual)
+    elif previous:
+        result['fov'] = previous['fov']
+    return result
+
+
 def position(source):
     if len(source) != 3 or not all(math.isfinite(float(x)) for x in source):
         raise ValueError("invalid Source position")
@@ -169,6 +201,28 @@ def camera(sample, aspect):
     return {"t": "cam", "f": int(sample["f"]), "p": position(sample["p"]),
             "pl": position(sample["feet"]), "r": [-yaw - 90, pitch, -roll],
             "fov": vfov, "fp": True, "h": -yaw - 90, "gun": False}
+
+
+def surface(sample):
+    """Virtual support from Source geometry; never place invisible Minecraft blocks."""
+    if sample.get('hit') is None:
+        return None
+    hit = position(sample['hit'])
+    normal = position(sample['normal'])
+    axis = max(range(3), key=lambda i: abs(normal[i]))
+    if abs(normal[axis]) < 0.01:
+        return None
+    sign = 1 if normal[axis] > 0 else -1
+    cell = [math.floor(v) for v in hit]
+    # Source traces stop 1/32 unit before a brush. Snap a nearly integral
+    # boundary before selecting the air cell on the outside of the surface.
+    v = hit[axis]
+    if abs(v - round(v)) < 1/64:
+        v = round(v)
+    # A Source floor/wall need not coincide with the voxel grid. Choose the
+    # first WHOLE cell outside it, rather than a cell straddling the brush.
+    cell[axis] = math.ceil(v) if sign > 0 else math.floor(v) - 1
+    return {'pos': hit, 'cell': cell, 'face': axis * 2 + (1 if sign > 0 else 0)}
 
 
 class PoseMemory:
@@ -215,15 +269,17 @@ async def transmit(args):
     inputs = InputRelay()
     host_input = HostInput(args.game)
     frames = FrameHeartbeat()
+    render = RenderPose()
     try:
-        await connected_loop(args, memory, inputs, host_input, frames)
+        await connected_loop(args, memory, inputs, host_input, frames, render)
     finally:
         host_input.set_gui(False)
         memory.memory.close()
         frames.close()
+        render.close()
 
 
-async def connected_loop(args, memory, inputs, host_input, frames):
+async def connected_loop(args, memory, inputs, host_input, frames, render):
     import websockets
     sample_path = args.game / "left4dead2/ems/l4d2mc_pose.txt"
     collision = CollisionSnapshot(sample_path.with_name('l4d2mc_collision.txt'))
@@ -236,8 +292,9 @@ async def connected_loop(args, memory, inputs, host_input, frames):
                 print("Minecraft guest connected", flush=True)
                 collision.cells.clear()
                 await socket.send(json.dumps({'t':'attach'}))
+                await socket.send(json.dumps({'t':'clear'}))
                 # Resume the guest if its pause menu was left open; reconnects begin in play mode.
-                await socket.send(json.dumps({'t':'key','k':'escape','down':True}))
+                # Do not send Escape during world startup: it cancels Minecraft's loading screen.
                 await socket.send(json.dumps({"t": "view", "w": args.width, "h": args.height}))
                 last_frame = None
                 last_collision = 0.0
@@ -246,6 +303,7 @@ async def connected_loop(args, memory, inputs, host_input, frames):
                 synced = False
                 sync_id = time.monotonic_ns()
                 next_sync = 0.0
+                last_render = None
                 while True:
                     host_fresh = False
                     try:
@@ -257,7 +315,11 @@ async def connected_loop(args, memory, inputs, host_input, frames):
                         if time.monotonic() - last_change < 0.5 and time.time() - sample_path.stat().st_mtime < 0.5:
                             host_fresh = True
                             pose = camera(sample, args.width / args.height)
-                            identity = (sample["map"], sample["f"])
+                            actual=render.read()
+                            pose = render_camera(pose, actual, last_render)
+                            if 'render_sequence' in pose:
+                                last_render = pose
+                            identity = (sample["map"], sample["f"], pose.get('render_sequence'))
                             if identity != last_frame:
                                 memory.publish(pose)
                                 await socket.send(json.dumps(pose))
@@ -270,10 +332,8 @@ async def connected_loop(args, memory, inputs, host_input, frames):
                                 if not synced and sync_after is not None and frames.fresh() and time.monotonic() >= max(sync_after,next_sync):
                                     await socket.send(json.dumps({'t':'blocksync','r':16,'id':sync_id}))
                                     next_sync = time.monotonic()+2
-                                ground = (math.floor(pose['pl'][0]), math.floor(pose['pl'][2]), math.floor(float(sample['ground'])/32)-1)
-                                if ground != last_ground:
-                                    await socket.send(json.dumps({'t':'ground','c':[ground[0],ground[1],ground[2],ground[2]]}))
-                                    last_ground = ground
+                                pose_surface = surface(sample)
+                                await socket.send(json.dumps({'t':'surface','hit':pose_surface}))
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
                     inputs.enabled = host_fresh and frames.fresh()
@@ -284,7 +344,7 @@ async def connected_loop(args, memory, inputs, host_input, frames):
                         await socket.send(json.dumps(command))
                     # Drain server notices without starving the sender.
                     try:
-                        reply = await asyncio.wait_for(socket.recv(), timeout=0.005)
+                        reply = await asyncio.wait_for(socket.recv(), timeout=0.001)
                         try:
                             event = json.loads(reply)
                             collision.apply(event)
@@ -299,7 +359,9 @@ async def connected_loop(args, memory, inputs, host_input, frames):
                             output.write(reply + "\n")
                     except asyncio.TimeoutError:
                         pass
-                    await asyncio.sleep(0.01)
+                    # The old 5ms receive wait + 10ms sleep capped camera delivery
+                    # below the guest's 120 FPS. Poll at ~250Hz without busy-waiting.
+                    await asyncio.sleep(0.003)
         except (OSError, websockets.exceptions.ConnectionClosed) as error:
             host_input.set_gui(False)
             collision.cells.clear()

@@ -99,3 +99,58 @@ conversion: пока только локальный c1m1_hotel, 128 кубич�
 world. Workshop-флаги совпали с launch backup побайтно. В последнем JAR
 добавлены controller attach/release и syncdone ack; эти аварийные ветки
 прошли сборку/ревью, отдельный игровой запуск после них ещё не выполнялся.
+
+
+## 2026-10-08 — camera / Source support fixes
+
+- Native read-only VEngineClient013 view/projection (L4D2 extra HideLoadingPlaque slot):
+  WorldToScreenMatrix slot37, WorldToViewMatrix slot38. Reference:
+  https://github.com/Lak3/l4d2-internal-base/blob/main/src/SDK/L4D2/Interfaces/EngineClient.h
+- Real camera pose, FOV, near/far; observed Source near7/far~5000 and vfov104.82
+  differed from previous approximate VScript FOV73.74/clip30000.
+- Snapshot metadata before texture upload; removed late rejection that left
+  new pixels with old pose. Reprojection validates its reconstructed hit in
+  host screen coordinates to avoid duplicate blocks at depth discontinuities.
+- Source aim trace produces virtual AIR-cell hit support for ordinary BlockItem;
+  no new barriers. One-time per-chunk migration scoped to own guest overworld.
+  Chunk callback uses chunk.setBlockState (level.setBlock deadlocked loading),
+  backup guest-before-support-migration-20261008 excludes locked session.lock.
+- Startup Escape could cancel world loading; removed and restricted screen
+  closing to joined player.
+- 13 Python tests + guest/native build pass. Source floor placement at two
+  unoccupied positions and wall placement verified by exact block-change events.
+  Placement intersecting player body correctly remains rejected.
+- Camera fixtures: three views, one yellow component, projected bounds error
+  <=2.07px (evidence/fix-camera-projection-check.json). 7.2s rapid-turn clip,
+  72 sampled frames had one yellow component, no missing fixture; this alone
+  did not exclude other blocks flickering (user reported remaining problem).
+- Generic Depth automatic largest-vertices snapshot suspected to switch sky/map
+  passes. Locked c1m1_hotel CLEAR2 via ReShade UI. Wall fixture invisible at
+  pitches0/10/25/40, visible with occlusion bypass; evidence/fix-wall-depth-check.json.
+  Generic Depth primary reference (BSD-3-Clause):
+  https://github.com/crosire/reshade/blob/v6.8.0/examples/09-depth/generic_depth_addon.cpp
+  Depth pass selection is map-specific pending broader testing.
+
+- D3D9 streaming: dynamic shader-resource-only front/back textures, all three
+  layers mapped WRITE_DISCARD then swapped together. COPY_DEST maps to
+  RENDERTARGET in ReShade D3D9 and is incompatible with DYNAMIC; removed.
+  Official primary references: crosire/reshade v6.8.0 source/d3d9/
+  d3d9_impl_device.cpp and d3d9_impl_type_convert.cpp.
+- True raw-color diagnostic ignores BOTH depth buffers. 896 raw frames had
+  no disappearing yellow fixture; 896 no-warp/depth frames were also stable.
+- Paired stationary test exposed whole-world disappearance frames94/95 with
+  guest eye [252.284027,-28.657433,-401.207214] versus actual player eye
+  [20.088867,90.961929,-181.631287], delta341.2286 MC units, unchanged angles.
+  Cross-check native eye against VScript within8 MC units before forwarding;
+  native and bridge retain measured calibration on rejected auxiliary views.
+  Reject nonfinite extracted planes. Regression includes real teleport.
+- User confirmed flicker stopped. Added visible-surface seeded inverse tracking
+  for translated views, validated screen correspondence and nearest-hit search
+  before tracked fallback. Final shader hotcompiled14:01:36 (13.125s).
+  Controlled 20s motion clips preserve fixture; yellow-area statistics alone
+  are affected by moving Source bots and cannot prove all-frame correctness.
+  User confirmed whole blocks while walking and stable distant position, but
+  reports residual smooth restoration on fast actions; no claim of zero latency.
+- Non-integral Source support planes now select ceil(normal+) / floor-1(normal-)
+  to keep a whole voxel outside brush. Existing builds preserved; potential
+  sub-voxel gap documented. 18 Python tests pass. Camera poll ~4ms vs15ms.

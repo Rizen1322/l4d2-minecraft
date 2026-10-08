@@ -85,12 +85,40 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
         local value = NetProps.GetPropInt(player, "m_iFOV");
         if (value > 10 && value < 170) fov = value;
     }
-    local ground = { start = feet + Vector(0,0,16), end = feet - Vector(0,0,96), ignore = player };
-    TraceLine(ground);
-    local gz = ("hit" in ground && ground.hit) ? ground.pos.z : feet.z;
+    local forward = player.EyeAngles().Forward();
+    local trace = {start=p, end=p+forward*160, ignore=player, mask=33570827}; // MASK_SOLID, excludes hitboxes
+    TraceLine(trace);
+    local surface = "null", normal = "null";
+    if ("hit" in trace && trace.hit && !("startsolid" in trace && trace.startsolid)) {
+        local own = false;
+        if ("enthit" in trace && trace.enthit != null) {
+            local name=trace.enthit.GetName();
+            own = name.find("l4d2mc_collision_") != null;
+            local cls=trace.enthit.GetClassname();
+            if (cls=="player" || cls=="infected" || cls=="witch") own=true;
+        }
+        if (!own) {
+            local n = Vector(0,0,0);
+            if ("plane_normal" in trace) n=trace.plane_normal;
+            else {
+                // L4D2's older VScript does not expose trace planes. Probe the
+                // six axes immediately outside the hit and use the closest face.
+                local outside=trace.pos-forward*0.5, best=3.0;
+                foreach (axis in [Vector(1,0,0),Vector(-1,0,0),Vector(0,1,0),Vector(0,-1,0),Vector(0,0,1),Vector(0,0,-1)]) {
+                    local probe={start=outside,end=outside-axis*2,ignore=player,mask=33570827};
+                    TraceLine(probe);
+                    if ("hit" in probe && probe.hit && probe.fraction<best) {best=probe.fraction;n=axis;}
+                }
+            }
+            if (n.Length()>0.5) {
+                surface=format("[%.6f,%.6f,%.6f]",trace.pos.x,trace.pos.y,trace.pos.z);
+                normal=format("[%.6f,%.6f,%.6f]",n.x,n.y,n.z);
+            }
+        }
+    }
     L4D2MCBridge.frame++;
-    local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"ground\":%.6f,\"buttons\":%d}",
-        L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,gz,player.GetButtonMask());
+    local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"hit\":%s,\"normal\":%s,\"buttons\":%d}",
+        L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,surface,normal,player.GetButtonMask());
     StringToFile("l4d2mc_pose.txt", data);
     if (Time() >= L4D2MCBridge.collisionAt) {
         L4D2MCBridge.collisionAt = Time() + 0.25;
