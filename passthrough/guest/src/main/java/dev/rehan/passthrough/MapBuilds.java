@@ -134,7 +134,13 @@ public final class MapBuilds {
                 var state=data.getBlockState(x,y,z);
                 if(state.isAir() || state.is(Blocks.BARRIER))continue;
                 p.set(chunk.getPos().getMinBlockX()+x,base+y,chunk.getPos().getMinBlockZ()+z);
-                if(Math.abs(p.getX())<=1023 && Math.abs(p.getZ())<=1023 && !Nether.isGround(p))cells.put(p.immutable(),capture(level,p,state));
+                if(Math.abs(p.getX())<=1023 && Math.abs(p.getZ())<=1023 && !Nether.isGround(p)) {
+                    // CHUNK_LOAD fires before the chunk future completes. A
+                    // level.getBlockEntity lookup waits for that same future and
+                    // recursively enters other chunk callbacks: use this chunk.
+                    BlockEntity be=chunk.getBlockEntity(p);
+                    cells.put(p.immutable(),new Cell(state,be==null?null:be.saveWithFullMetadata(level.registryAccess())));
+                }
             }
         }
     }

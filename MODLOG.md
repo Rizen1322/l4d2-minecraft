@@ -276,3 +276,20 @@ Offline world backup (all files SHA256 verified): E:\вин\ПРОЕКТЫ\main\
 Four own files installed and verified. No games launched; loaders and graphics settings unchanged.
 
 Final read-only review confirmed retained recovery tombstones through repeated interruptions; no further concrete errors in the targeted check. Runtime verification remains pending.
+
+
+2026-10-08 world loading hang reported after survival update. Read-only jcmd
+Thread.print on existing Minecraft PID4632 confirmed repeated Server thread
+MapBuilds.chunk -> capture -> Level.getBlockEntity -> ServerChunkCache.getChunk
+-> managedBlock -> Fabric CHUNK_LOAD -> MapBuilds.chunk. Log stuck loading49
+spawn chunks/16%, no crash and no archive created. Root cause: global world
+lookup inside CHUNK_LOAD before its future completes. Replaced per-cell world
+capture with direct chunk.getBlockEntity, as already done for CHUNK_UNLOAD.
+No game launched or terminated; no saves restored/deleted. New JAR build/tests
+and runtime relaunch status recorded below.
+
+World-load fix built successfully, 40 Python tests passed, diff check passed.
+Updated guest JAR installed with matching SHA256. Read-only review confirmed
+no world chunk lookup remains in CHUNK_LOAD callback. Existing Minecraft still
+runs the old loaded classes; normal user restart is required, no restart/kill
+was performed by agent. No archive existed during observed loading hang.
