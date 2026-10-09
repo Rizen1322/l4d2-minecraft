@@ -393,3 +393,20 @@ regressions now reject vanished-platform hurt destinations and steep slopes.
 Build passed63Python,12JVM programs,7actual Source suites and x86 PE verification.
 Nine owned components installed and SHA verified. Games not opened or controlled;
 new HUD, door and fall rescue remain runtime unverified, restart required.
+
+2026-10-09 intermittent cursor repair: world cursor ownership no longer depends
+on guest pose/input heartbeat. A same-process, window-thread WH_CALLWNDPROCRET
+hook clears HTCLIENT WM_SETCURSOR after Source/window class processing; messages
+are never swallowed. Source gameplay/menu and foreground rechecked on UI thread.
+Inventory, Source/ReShade menus, border and stale presentation yield normally.
+Removed render-thread world ShowCursor debt loop. Module pinned until process exit
+to protect returning callbacks after Unhook; no hot unload support. Lazy Source
+interface references and callback verifier atomic across UI/render threads.
+Real Win32 hidden-window test installed hook from live second thread and confirmed
+repeated arrow reset, GUI/menu/border/stale/unhook cases without showing or focusing
+any window. Foreground accessor mocked only in test; actual game focus unverified.
+Full build63Python/12JVM/7Source/native cursor test passed. No games controlled.
+Installation attempted: only changed addon32 is locked by running L4D2. New
+binary remains in dist; current process still has previous code. Existing
+Launch-L4D2MC-2K.bat -> Launch-Minecraft.ps1 applies owned update before starting
+next session, so replacement awaits normal user exit/relaunch. No game closed.

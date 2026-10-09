@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <atomic>
 
 // L4D2 VEngineClient013 differs from SDK2013: HideLoadingPlaque occupies slot29.
 // Read-only view API: no hooks, engine writes or offsets into player structures.
@@ -16,11 +17,13 @@ inline bool readable(const void* p, size_t bytes) {
 }
 // Read-only methods before the validated matrix slots in this exact interface.
 inline bool gameplay_visible() {
-    static void* engine=nullptr;
+    static std::atomic<void*> reference{nullptr};
+    void* engine=reference.load();
     if(!engine) {
         auto module=GetModuleHandleW(L"engine.dll");
         auto factory=module?reinterpret_cast<void*(__cdecl*)(const char*,int*)>(GetProcAddress(module,"CreateInterface")):nullptr;
         engine=factory?factory("VEngineClient013",nullptr):nullptr;
+        if(engine)reference.store(engine);
     }
     if(!readable(engine,sizeof(void*)))return false;
     auto table=*reinterpret_cast<void***>(engine);
@@ -31,11 +34,13 @@ inline bool gameplay_visible() {
 // VEngineVGui001: destructor, GetPanel, IsGameUIVisible (slot 2).
 // Valve public ienginevgui.h and the L4D2 SDK EngineVGui.h agree on these slots.
 inline bool menu_visible() {
-    static void* vgui=nullptr;
+    static std::atomic<void*> reference{nullptr};
+    void* vgui=reference.load();
     if(!vgui) {
         auto module=GetModuleHandleW(L"engine.dll");
         auto factory=module?reinterpret_cast<void*(__cdecl*)(const char*,int*)>(GetProcAddress(module,"CreateInterface")):nullptr;
         vgui=factory?factory("VEngineVGui001",nullptr):nullptr;
+        if(vgui)reference.store(vgui);
     }
     if(!readable(vgui,sizeof(void*)))return false;
     auto table=*reinterpret_cast<void***>(vgui);

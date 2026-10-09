@@ -2,6 +2,7 @@
 #include <algorithm>
 #include "source_camera.h"
 #include "source_input.h"
+#include "source_cursor.h"
 #include "compositor.h"
 #include <windows.h>
 #include <algorithm>
@@ -62,6 +63,8 @@ namespace
     uint32_t g_debugMode = 0;
 	int g_cursorShows = 0;
     bool g_releasedSourceMouse=false;
+    bool g_cursorAttached=false;
+    std::atomic<bool> g_reshadeMenu{false};
 
 	struct Layer
 	{
@@ -345,17 +348,23 @@ namespace
 		last = info.ftLastWriteTime;
 	}
 
-    int g_worldCursorHides=0;
-    void restore_world_cursor_counter() {
-        while(g_worldCursorHides>0){ShowCursor(TRUE);--g_worldCursorHides;}
+    bool cursor_gameplay_verified() {
+        return !g_reshadeMenu.load() && !source_camera::menu_visible() && source_camera::gameplay_visible();
+    }
+    bool on_open_overlay(effect_runtime*,bool open,reshade::api::input_source) {
+        g_reshadeMenu=open;
+        if(open)source_cursor::hide=false;
+        return false;
     }
 	void on_present(effect_runtime *runtime)
 	{
         source_camera::publish_visibility(source_camera::gameplay_visible());
-        const bool hostMenu=source_camera::menu_visible();
-        const bool worldCursor=!hostMenu && g_active && g_sceneVisible && g_guestInputAlive && !g_guestUiOpen
+        const bool hostMenu=source_camera::menu_visible() || g_reshadeMenu.load();
+        if(g_active && g_sceneVisible)g_cursorAttached=true;
+        const bool guestGui=g_guestUiOpen && g_guestInputAlive;
+        const bool worldCursor=g_cursorAttached && !hostMenu && !guestGui
             && source_camera::gameplay_visible() && GetForegroundWindow()==runtime->get_hwnd();
-        if(!worldCursor)restore_world_cursor_counter();
+        source_cursor::publish(static_cast<HWND>(runtime->get_hwnd()),worldCursor,cursor_gameplay_verified);
 		watch_effect_file(runtime);
         if(hostMenu) {
             while(g_cursorShows>0){ShowCursor(FALSE);--g_cursorShows;}
@@ -384,14 +393,9 @@ namespace
                 g_releasedSourceMouse=false;
             }
             while (g_cursorShows > 0) { ShowCursor(FALSE); --g_cursorShows; }
-            if(g_active && g_sceneVisible && g_guestInputAlive && !g_guestUiOpen && source_camera::gameplay_visible() && GetForegroundWindow()==runtime->get_hwnd()) {
+            if(worldCursor) {
                 source_input::mouse(true,true);
                 SetCursor(nullptr);
-                CURSORINFO cursor{};cursor.cbSize=sizeof(cursor);
-                if(GetCursorInfo(&cursor) && (cursor.flags&CURSOR_SHOWING)) {
-                    int count;
-                    do{count=ShowCursor(FALSE);++g_worldCursorHides;}while(count>=0 && g_worldCursorHides<32);
-                }
             }
         }
 	}
@@ -559,6 +563,7 @@ namespace
 
 	void on_destroy_effect_runtime(effect_runtime *runtime)
 	{
+        source_cursor::remove();g_cursorAttached=false;
 		destroy_layers(runtime->get_device());
 	}
 }
@@ -573,6 +578,7 @@ namespace compositor
 			return false;
 		reshade::register_event<reshade::addon_event::reshade_begin_effects>(on_begin_effects);
 		reshade::register_event<reshade::addon_event::reshade_present>(on_present);
+        reshade::register_event<reshade::addon_event::reshade_open_overlay>(on_open_overlay);
 		reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(on_reloaded_effects);
 		reshade::register_event<reshade::addon_event::destroy_effect_runtime>(on_destroy_effect_runtime);
         // Experimental capture is disabled until its depth output is validated.
@@ -583,7 +589,7 @@ namespace compositor
 
 	void unregister(void *module)
 	{
-		restore_world_cursor_counter();
+        source_cursor::remove();g_cursorAttached=false;
         while(g_cursorShows>0){ShowCursor(FALSE);--g_cursorShows;}
 		source_input::restore();
 		if (g_registered.exchange(false))
