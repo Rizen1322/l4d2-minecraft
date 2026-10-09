@@ -10,6 +10,48 @@ if(!("shieldCharge" in L4D2MCBridge.survival)) {
     L4D2MCBridge.survival.shieldCharge<-6;L4D2MCBridge.survival.shieldCooldown<-0.0;
     L4D2MCBridge.survival.shieldHitAt<-{};
 }
+if(!("fireZones" in L4D2MCBridge.survival)) {
+    L4D2MCBridge.survival.fireZones<-[];L4D2MCBridge.survival.fireActors<-{};L4D2MCBridge.survival.nextFire<-0.0;
+}
+if(!("totemPending" in L4D2MCBridge.survival)) {
+    L4D2MCBridge.survival.totemPending<-null;L4D2MCBridge.survival.totemHeld<-false;L4D2MCBridge.survival.totemAt<- -100.0;
+}
+L4D2MCBridge.TotemPendingFor <- function(player) {
+    local v=survival.totemPending;
+    return v!=null && v.entity==player && player.IsValid() && Time()-v.at<30;
+};
+L4D2MCBridge.TotemHeld <- function(f) {
+    if(f.len()!=2)return;local held=Integer(f[1]);if(held>1)return;
+    survival.totemHeld=held==1;survival.totemAt=Time();
+};
+L4D2MCBridge.TotemRequest <- function(player) {
+    if(player==null || !player.IsValid() || player!=survival.player || !GameplayLease()
+        || !survival.totemHeld || Time()-survival.totemAt>0.75 || TotemPendingFor(player))return;
+    if(!player.IsDead() && player.GetHealth()>0 && !player.IsIncapacitated())return;
+    if(!player.IsDead() && player.IsHangingFromLedge())return;
+    survival.replySerial++;
+    survival.totemPending={entity=player,key=format("totem_%d_%d_%d",epoch,player.GetEntityIndex(),survival.replySerial),at=Time(),next=0.0};
+    TotemTick(player);
+};
+L4D2MCBridge.TotemTick <- function(player) {
+    if(!TotemPendingFor(player)) {if(survival.totemPending!=null && Time()-survival.totemPending.at>=30)survival.totemPending=null;return;}
+    local v=survival.totemPending;if(Time()<v.next)return;v.next=Time()+0.5;
+    Reply("\"t\":\"totemrequest\",\"key\":\""+v.key+"\"");
+};
+L4D2MCBridge.TotemResult <- function(f,player) {
+    if(f.len()!=5 || !TotemPendingFor(player) || f[3]!=survival.totemPending.key)return;
+    local used=Integer(f[4]);if(used>1)return;
+    if(used==0){survival.totemPending=null;survival.totemHeld=false;return;}
+    // Native CTerrorPlayer no-argument bindings, not a generic entity respawn.
+    if(player.IsDead())player.ReviveByDefib();
+    else if(player.IsIncapacitated())player.ReviveFromIncap();
+    if(player.IsDead() || player.IsIncapacitated())return;
+    player.SetHealth(100);
+    if(NetProps.HasProp(player,"m_healthBuffer"))NetProps.SetPropFloat(player,"m_healthBuffer",0.0);
+    if(player.GetHealth()!=100)return;
+    local key=survival.totemPending.key;survival.totemPending=null;survival.totemHeld=false;
+    Reply("\"t\":\"totemapplied\",\"key\":\""+key+"\"");
+};
 L4D2MCBridge.ShieldAvailable <- function(){return Time()>=survival.shieldCooldown && survival.shieldCharge>0;};
 L4D2MCBridge.ShieldSpend <- function(e) {
     if(!ShieldAvailable())return false;
@@ -155,20 +197,65 @@ L4D2MCBridge.ShieldTick <- function(player) {
     }
 };
 L4D2MCBridge.IgniteGround <- function(f,player) {
-    if(Time()<survival.nextIgnite || survival.fires.len()>=6 || !("DropFire" in getroottable()))return;
-    local p=Vector(Number(f[3]),Number(f[4]),Number(f[5]));
-    if((p-player.EyePosition()).Length()>160)return;
-    local t=Raycast(player.EyePosition(),p-Vector(0,0,2),player);
-    if(!("hit" in t && t.hit) || (t.pos-p).Length()>12)return;
-    local floor={start=p+Vector(0,0,4),end=p-Vector(0,0,12),ignore=player,mask=16395};TraceLine(floor);
-    if(!("hit" in floor && floor.hit) || ("startsolid" in floor && floor.startsolid))return;
-    if(!WalkableFloor(floor,player))return;
-    local count=0,e=null,before={};while((e=Entities.Next(e))!=null){count++;if(e.GetClassname()=="inferno")before[e.GetEntityIndex()]<-true;}
-    if(count>=1400)return;
-    foreach(v in survival.fires)if(v.entity.IsValid() && (v.pos-p).Length()<64)return;
-    survival.nextIgnite=Time()+0.5;DropFire(floor.pos+Vector(0,0,2));
-    e=null;while((e=Entities.FindByClassname(e,"inferno"))!=null)
-        if(!(e.GetEntityIndex() in before) && (e.GetOrigin()-p).Length()<256)survival.fires.append({entity=e,pos=p,until=Time()+12});
+    // Legacy one-shot events are deliberately inert. Actual Minecraft FIRE
+    // heartbeat below owns contact; never spawn a native inferno on the floor.
+};
+L4D2MCBridge.FireZone <- function(f,player) {
+    if(f.len()!=4 || survival.fireZones.len()>=32)return;
+    local p=Vector(Number(f[1]),Number(f[2]),Number(f[3]));
+    if((p-player.GetOrigin()).Length()>1600)return;
+    survival.fireZones.append(p);
+};
+L4D2MCBridge.FireOverlap <- function(p,lo,hi) {
+    return hi.x>p.x && lo.x<p.x+32 && hi.y>p.y-32 && lo.y<p.y
+        && hi.z>p.z-2 && lo.z<p.z+32;
+};
+L4D2MCBridge.FireTick <- function(player) {
+    if(Time()<survival.nextFire)return;survival.nextFire=Time()+0.2;
+    local stale=[];foreach(id,v in survival.fireActors)if(!v.entity.IsValid() || v.entity.GetHealth()<=0 || Time()>v.until)stale.append(id);
+    foreach(id in stale)delete survival.fireActors[id];
+    if(survival.fireZones.len()>0)foreach(cls in ["player","infected","witch"]) {
+        local e=null,count=0;
+        while((e=Entities.FindByClassnameWithin(e,cls,player.GetOrigin(),1600))!=null && count++<64) {
+            // Local Steve has Minecraft's burning flag + authoritative Source
+            // guestBurn damage path; do not add a duplicate native body flame.
+            if(e==player || e.GetHealth()<=0)continue;
+            local p=e.GetOrigin(),lo=p-Vector(16,16,0),hi=p+Vector(16,16,72);
+            if(NetProps.HasProp(e,"m_Collision.m_vecMins") && NetProps.HasProp(e,"m_Collision.m_vecMaxs")) {
+                lo=p+NetProps.GetPropVector(e,"m_Collision.m_vecMins");hi=p+NetProps.GetPropVector(e,"m_Collision.m_vecMaxs");
+            }
+            if(NetProps.HasProp(e,"m_nWaterLevel") && NetProps.GetPropInt(e,"m_nWaterLevel")>0)continue;
+            foreach(zone in survival.fireZones)if(FireOverlap(zone,lo,hi)) {
+                local t=Raycast(p+Vector(0,0,16),zone+Vector(16,-16,12),e);
+                if("hit" in t && t.hit)continue;
+                local id=e.GetEntityIndex();
+                if(!(id in survival.fireActors) || survival.fireActors[id].entity!=e) {
+                    if(survival.fireActors.len()>=64)break;
+                    survival.fireActors[id]<-{entity=e,until=Time()+4,nextIgnite=0.0,nextHit=Time()+0.25};
+                }
+                survival.fireActors[id].until=Time()+4;break;
+            }
+        }
+    }
+    local entities=0,scan=null;if(survival.fireActors.len()>0)while((scan=Entities.Next(scan))!=null)entities++;
+    foreach(id,v in survival.fireActors) {
+        local e=v.entity;
+        if(NetProps.HasProp(e,"m_nWaterLevel") && NetProps.GetPropInt(e,"m_nWaterLevel")>0)continue;
+        local flame=NetProps.HasProp(e,"m_hEffectEntity")?NetProps.GetPropEntity(e,"m_hEffectEntity"):null;
+        if(Time()>=v.nextIgnite) {
+            if((flame!=null && flame.IsValid()) || entities<1400) {
+                local name=e.GetName();if(name==null || name.len()==0){name=UniqueString("l4d2mc_burning_");e.__KeyValueFromString("targetname",name);}
+                EntFire(name,"IgniteLifetime",(v.until-Time()).tostring(),0,player);
+                if(flame==null || !flame.IsValid())entities++;
+            }
+            v.nextIgnite=Time()+1;
+        }
+        // Native entityflame supplies the game's normal burn damage. Some map
+        // actors reject IgniteLifetime; supply only their otherwise missing DOT.
+        if((flame==null || !flame.IsValid() || flame.GetClassname()!="entityflame") && Time()>=v.nextHit) {
+            e.TakeDamage(e.GetClassname()=="player" && e.IsSurvivor()?2:10,8,player);v.nextHit=Time()+0.5;
+        }
+    }
 };
 L4D2MCBridge.SurvivalCleanup <- function() {
     foreach(v in survival.fires)if(v.entity.IsValid())v.entity.Kill();survival.fires.clear();
@@ -178,6 +265,7 @@ L4D2MCBridge.SurvivalCleanup <- function() {
     survival.meal=0.0;survival.nextMeal=0.0;survival.nextBurn=0.0;
     survival.nextShield=0.0;survival.nextIgnite=0.0;survival.nextAggro=0.0;
     survival.nextPressure=0.0;survival.pressureIndex=0;
+    survival.fireZones.clear();survival.fireActors.clear();survival.nextFire=0.0;
     if("swordAt" in survival)delete survival.swordAt;
     if("dropLatch" in survival)survival.dropLatch=false;
 };
@@ -283,6 +371,8 @@ L4D2MCBridge.ConvertPickups <- function(player) {
 };
 L4D2MCBridge.SurvivalTick <- function(player) {
     ConvertPickups(player);
+    TotemRequest(player);TotemTick(player);
+    FireTick(player);
     if(survival.guestBurn && Time()-survival.effectsAt<0.75 && Time()>=survival.nextBurn) {
         survival.nextBurn=Time()+0.5;
         local nativeFlame=NetProps.HasProp(player,"m_hEffectEntity")?NetProps.GetPropEntity(player,"m_hEffectEntity"):null;
@@ -334,6 +424,7 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
         OnGameEvent_round_start=function(event) {
             if("L4D2MCBridge" in getroottable()) {
                 local b=L4D2MCBridge;b.epoch=RandomInt(1,2000000000);b.SurvivalCleanup();
+                b.survival.totemPending=null;b.survival.totemHeld=false;b.survival.totemAt=-100.0;
                 b.survival.links.clear();
                 b.ClearCollision();b.collisionSequence="";
                 b.gameplay.content=null;b.gameplay.armed=false;b.gameplay.replies.clear();
@@ -344,10 +435,16 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
             local b=L4D2MCBridge,p=GetPlayerFromUserID(event.victim),s=GetPlayerFromUserID(event.userid);
             if(p!=null && s!=null && b.ShieldFacing(p,s))b.ShieldRepel(p,s);
         },
+        OnGameEvent_player_incapacitated=function(event) {
+            if("L4D2MCBridge" in getroottable() && "userid" in event)L4D2MCBridge.TotemRequest(GetPlayerFromUserID(event.userid));
+        },
+        OnGameEvent_player_death=function(event) {
+            if("L4D2MCBridge" in getroottable() && "userid" in event)L4D2MCBridge.TotemRequest(GetPlayerFromUserID(event.userid));
+        },
         OnGameEvent_player_hurt=function(event) {
             if(!("L4D2MCBridge" in getroottable()))return;
             local b=L4D2MCBridge;if(Time()-b.survival.hookLiveAt<0.1 || !b.GameplayLease())return;
-            local p=GetPlayerFromUserID(event.userid);if(p==null || p!=b.survival.player || p.IsIncapacitated() || p.GetHealth()<=0)return;
+            local p=GetPlayerFromUserID(event.userid);b.TotemRequest(p);if(p==null || p!=b.survival.player || p.IsIncapacitated() || p.GetHealth()<=0)return;
             local from=null;
             if("attackerentid" in event && event.attackerentid>0)from=EntIndexToHScript(event.attackerentid);
             if(from==null && "attacker" in event && event.attacker>0)from=GetPlayerFromUserID(event.attacker);

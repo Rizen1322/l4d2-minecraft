@@ -5,6 +5,8 @@ L4D2MCBridge.gameplay <- L4D2MCPreviousGameplay!=null?L4D2MCPreviousGameplay:
     physics={},physIndex=0,ground=[],wheel=0};
 L4D2MCPreviousGameplay=null;
 if(!("forced" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.forced<-{};
+if(!("nativeUseIntent" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.nativeUseIntent<-false;
+if(!("usePulseUntil" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.usePulseUntil<-0.0;
 L4D2MCBridge.Number <- function(token,limit=32768.0) {
     if(token.len()==0 || token.len()>32)throw "invalid number";
     for(local i=0;i<token.len();i++)if("0123456789-+.eE".find(token.slice(i,i+1))==null)throw "invalid numeric token";
@@ -29,11 +31,48 @@ L4D2MCBridge.Hide <- function(e) {
     if(!(id in gameplay.hidden) || gameplay.hidden[id].entity!=e)gameplay.hidden[id]<-{entity=e,old=(flags&32)!=0};
     NetProps.SetPropInt(e,"m_fEffects",flags|32);
 };
+L4D2MCBridge.RestoreHidden <- function(id) {
+    if(!(id in gameplay.hidden))return;
+    local saved=gameplay.hidden[id],e=saved.entity;
+    if(e.IsValid()) {
+        if(!saved.old)NetProps.SetPropInt(e,"m_fEffects",NetProps.GetPropInt(e,"m_fEffects")&(~32));
+        if("renderMode" in saved && NetProps.GetPropInt(e,"m_nRenderMode")==10)NetProps.SetPropInt(e,"m_nRenderMode",saved.renderMode);
+    }
+    delete gameplay.hidden[id];
+};
+L4D2MCBridge.HideOwnedWeaponModel <- function(e,player,wanted) {
+    if(e==null || !e.IsValid() || !NetProps.HasProp(e,"m_fEffects"))return;
+    Hide(e);local id=e.GetEntityIndex(),saved=gameplay.hidden[id];
+    saved.weaponOwner<-player;wanted[id]<-e;
+    // World/bonemerge models can have their visibility refreshed by camera changes.
+    if(NetProps.HasProp(e,"m_nRenderMode")) {
+        if(!("renderMode" in saved))saved.renderMode<-NetProps.GetPropInt(e,"m_nRenderMode");
+        NetProps.SetPropInt(e,"m_nRenderMode",10); // kRenderNone, not a global rendering setting.
+    }
+};
+L4D2MCBridge.HidePlayerWeapons <- function(player) {
+    local wanted={};
+    if(NetProps.HasProp(player,"m_hMyWeapons")) {
+        for(local i=0;i<NetProps.GetPropArraySize(player,"m_hMyWeapons");i++) {
+            local weapon=NetProps.GetPropEntityArray(player,"m_hMyWeapons",i);
+            HideOwnedWeaponModel(weapon,player,wanted);
+            if(weapon!=null && weapon.IsValid() && NetProps.HasProp(weapon,"m_hWeaponWorldModel"))
+                HideOwnedWeaponModel(NetProps.GetPropEntity(weapon,"m_hWeaponWorldModel"),player,wanted);
+        }
+    }
+    if(NetProps.HasProp(player,"m_hActiveWeapon"))HideOwnedWeaponModel(NetProps.GetPropEntity(player,"m_hActiveWeapon"),player,wanted);
+    if(NetProps.HasProp(player,"m_hViewModel"))
+        for(local i=0;i<NetProps.GetPropArraySize(player,"m_hViewModel");i++)HideOwnedWeaponModel(NetProps.GetPropEntityArray(player,"m_hViewModel",i),player,wanted);
+    // Never leave a dropped gun/quest item invisible after it leaves this survivor.
+    local restore=[];
+    foreach(id,saved in gameplay.hidden)if("weaponOwner" in saved && saved.weaponOwner==player && (!(id in wanted) || wanted[id]!=saved.entity))restore.append(id);
+    foreach(id in restore)RestoreHidden(id);
+};
 L4D2MCBridge.RestoreAppearance <- function() {
+    gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;
     if("SurvivalCleanup" in this)SurvivalCleanup();
-    foreach(id,v in gameplay.hidden)if(v.entity.IsValid() && !v.old)
-        NetProps.SetPropInt(v.entity,"m_fEffects",NetProps.GetPropInt(v.entity,"m_fEffects")&(~32));
-    gameplay.hidden.clear();
+    local hiddenIds=[];foreach(id,v in gameplay.hidden)hiddenIds.append(id);
+    foreach(id in hiddenIds)RestoreHidden(id);
     foreach(id,v in gameplay.forced)if(v.entity.IsValid()) {
         local flags=NetProps.GetPropInt(v.entity,"m_afButtonForced");
         NetProps.SetPropInt(v.entity,"m_afButtonForced",(flags&(~33))|v.old);
@@ -82,19 +121,31 @@ L4D2MCBridge.FindActor <- function(id) {
     return null;
 };
 L4D2MCBridge.ActorJson <- function(player) {
-    local out="[",n=0;
+    local out="[",n=0,candidates=[];
     foreach(kind in ["player","infected","witch"]) {
         local e=null;
-        while((e=Entities.FindByClassname(e,kind))!=null && n<48) {
-            if(e.GetHealth()<=0 || (e.GetOrigin()-player.GetOrigin()).Length()>1024)continue;
-            local id=L4D2MCBridge.Actor(e),p=e.GetOrigin();
-            local faction=(kind=="player" && e.IsSurvivor())?0:1;
-            out+=format("%s[%d,%.4f,%.4f,%.4f,%d]",n++==0?"":",",id,p.x/32,p.z/32,-p.y/32,faction);
+        while((e=Entities.FindByClassname(e,kind))!=null) {
+            if(!ActorAlive(e))continue;
+            local p=e.GetOrigin(),distance=(p-player.GetOrigin()).Length();
+            if("survival" in this && "golems" in survival)foreach(id,golem in survival.golems)
+                if(golem.entity.IsValid() && Time()-golem.at<1){local d=(p-golem.pos).Length();if(d<distance)distance=d;}
+            if(distance>1536)continue;
+            candidates.append({entity=e,pos=p,distance=distance,faction=(kind=="player" && e.IsSurvivor())?0:1});
         }
+    }
+    // Enumeration order must not let distant corpses/hordes starve nearby targets.
+    candidates.sort(function(a,b){return a.distance<b.distance?-1:a.distance>b.distance?1:0;});
+    foreach(row in candidates){
+        if(n>=48)break;
+        local id=Actor(row.entity),p=row.pos;
+        out+=format("%s[%d,%.4f,%.4f,%.4f,%d]",n++==0?"":",",id,p.x/32,p.z/32,-p.y/32,row.faction);
     }
     local dead=[];foreach(index,v in gameplay.actors)if(!v.entity.IsValid() || Time()-v.seen>2)dead.append(index);
     foreach(index in dead)delete gameplay.actors[index];
     return out+"]";
+};
+L4D2MCBridge.ActorAlive <- function(e) {
+    return e!=null && e.IsValid() && e.GetHealth()>0 && (!NetProps.HasProp(e,"m_lifeState") || NetProps.GetPropInt(e,"m_lifeState")==0);
 };
 L4D2MCBridge.IsCombatTarget <- function(e) {
     return e!=null && e.IsValid() && (e.GetClassname()=="infected" || e.GetClassname()=="witch" || e.GetClassname()=="player");
@@ -135,14 +186,14 @@ L4D2MCBridge.HeldActions <- function(player,attack,use,gui) {
     if(!use && "dropLatch" in survival)survival.dropLatch=false;
     local weapon=NetProps.GetPropEntity(player,"m_hActiveWeapon"),kind=weapon!=null?weapon.GetClassname():"";
     local carry=CarryItem(kind);
-    local directUse=false;
-    if(use) {
-        local p=player.EyePosition(),t=Raycast(p,p+player.EyeAngles().Forward()*96,player);
-        if("enthit" in t && t.enthit!=null) {
-            local cls=t.enthit.GetClassname();directUse=cls.find("door")!=null || cls=="func_button";
-        }
-    }
-    if(!gui && use && !("dropLatch" in survival && survival.dropLatch) && !directUse && (Usable(player) || carry))wanted=wanted|32; // IN_USE, normal Source use/hold processing.
+    // Checkpoint doors use their native survivor use logic to remove the bar
+    // before opening. Toggle/Press inputs bypass that first stage and map outputs.
+    // Only an explicit guest native-use edge owns this hold. MC mob/item clicks
+    // must not open a Source door behind their non-solid Minecraft target.
+    if(gui){gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;}
+    local nativeUse=(use && gameplay.nativeUseIntent) || Time()<gameplay.usePulseUntil;
+    if(!use)gameplay.nativeUseIntent=false;
+    if(!gui && nativeUse && !("dropLatch" in survival && survival.dropLatch) && (Usable(player) || carry))wanted=wanted|32;
     if(!gui && attack && carry)wanted=wanted|1; // IN_ATTACK only for map carry/use items, never hidden guns.
     NetProps.SetPropInt(player,"m_afButtonForced",(flags&(~33))|gameplay.forced[id].old|wanted);
 };
@@ -203,6 +254,8 @@ L4D2MCBridge.Event <- function(fields,player) {
         printl("[L4D2MC COMBAT] explosion "+p+" radius="+radius);
     } else if(kind=="pickupack" && fields.len()==4) {
         PickupAck(fields[3]);
+    } else if(kind=="totemresult" && fields.len()==5) {
+        TotemResult(fields,player);
     } else if(kind=="rewardack" && fields.len()==4) {
         RewardAck(fields[3]);
     } else if(kind=="link" && fields.len()==6) {
@@ -261,11 +314,15 @@ L4D2MCBridge.Event <- function(fields,player) {
             local hit=tier>0 && e.GetClassname()=="infected"?e.GetHealth()+1.0:damage;
             e.TakeDamage(hit,128,player);
         }
-    } else if(kind=="mobhit" && fields.len()==9) {
+    } else if(kind=="mobhit" && (fields.len()==9 || fields.len()==10)) {
         local id=Integer(fields[3]),damage=Number(fields[4],500);
         local from=Vector(Number(fields[5]),Number(fields[6]),Number(fields[7]));
         local target=FindActor(id);
-        if(target!=null && damage>=0 && (target.GetOrigin()-from).Length()<512) {
+        if(ActorAlive(target) && damage>=0 && (target.GetOrigin()-from).Length()<512) {
+            if(fields.len()==10 && fields[9]=="iron_golem" && !(target.GetClassname()=="player" && target.IsSurvivor())) {
+                if(target.GetClassname()=="infected"){local lethal=target.GetHealth()+1;if(damage<lethal)damage=lethal;}
+                else if(damage<180)damage=180;
+            }
             local attacker=Integer(fields[8]),ignore=attacker in gameplay.physics?gameplay.physics[attacker].proxy:null;
             local trace=Raycast(from+Vector(0,0,24),target.GetOrigin()+Vector(0,0,32),ignore);
             if(!("hit" in trace) || !trace.hit || ("enthit" in trace && trace.enthit==target)) {
@@ -278,16 +335,14 @@ L4D2MCBridge.Event <- function(fields,player) {
         if(id in gameplay.replies)delete gameplay.replies[id];
     } else if(kind=="interact" && fields.len()==3) {
         local held=player.GetActiveWeapon();
-        if(held!=null && (CarryItem(held.GetClassname()) || held.GetClassname()=="weapon_melee")) {player.DropItem(held.GetClassname());survival.dropLatch<-true;return;}
-        local p=player.EyePosition(),trace=Raycast(p,p+player.EyeAngles().Forward()*96,player);
-        if("enthit" in trace && trace.enthit!=null) {
-            local kind=trace.enthit.GetClassname();
-            if(kind.find("door")!=null || kind=="func_button") {
-                local name=trace.enthit.GetName();
-                if(name==null || name.len()==0){name=UniqueString("l4d2mc_use_");trace.enthit.__KeyValueFromString("targetname",name);}
-                EntFire(name,kind.find("door")!=null?"Toggle":"Press","",0,player);
-            }
+        if(held!=null && (CarryItem(held.GetClassname()) || held.GetClassname()=="weapon_melee")) {
+            player.DropItem(held.GetClassname());survival.dropLatch<-true;
+            gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;return;
         }
+        // HeldActions forwards the actual IN_USE press/hold. Never force an
+        // entity input: locked doors, checkpoint bars and button events belong
+        // to the campaign's use implementation.
+        if(Usable(player)) {gameplay.nativeUseIntent=true;gameplay.usePulseUntil=Time()+0.12;}
     } else throw "invalid event";
 };
 L4D2MCBridge.Projectile <- function(fields,player) {
@@ -328,6 +383,7 @@ L4D2MCBridge.Physics <- function(fields,player) {
     if((p-player.GetOrigin()).Length()>2048)return; // Out of range is ordinary during movement/teleports.
     if(!(id in gameplay.physics))gameplay.physics[id]<-{proxy=null,pos=p,width=width,height=height,at=Time()};
     local v=gameplay.physics[id];v.pos=p;v.width=width;v.height=height;v.at=Time();
+    v.mob<-mob;
     // Mobs have no Source collision prop: they remain visible/attackable in
     // Minecraft while Source survivors can walk through them without trapping.
     if(v.proxy!=null){if(v.proxy.IsValid())v.proxy.Kill();v.proxy=null;}
@@ -387,11 +443,17 @@ L4D2MCBridge.GroundPhysics <- function() {
         }
         local floor=("hit" in trace && trace.hit && !("startsolid" in trace && trace.startsolid))?1:0;
         local y=floor?trace.pos.z/32:p.z/32;
+        // A TNT/item may spawn slightly inside a sloping floor after grid
+        // placement. Probe its hull above the verified surface; otherwise every
+        // side ray starts solid and we never send the floor that would lift it.
+        // Airborne entities retain their real position and gravity.
+        if(floor && "mob" in v && v.mob==0 && trace.pos.z>p.z && trace.pos.z-p.z<=16)
+            p=Vector(p.x,p.y,trace.pos.z+0.5);
         local xmin=-4096.0,xmax=4096.0,zmin=-4096.0,zmax=4096.0;
         // Probe the body's width and three heights, far enough ahead for
         // round-robin/network delay. A midpoint-only ray misses doors/corners.
         local radius=v.width/2,side=radius>1?radius-1:0,distance=radius+96;
-        local low=v.height>64?24:v.height/4;
+        local low=v.height/4<4?v.height/4:4; // Feet/bumpers and low ledges, same probe budget.
         local tops=[p.z/32+8,p.z/32+8,p.z/32+8,p.z/32+8];
         local embedded=false,escapeAxis=-1,escapeDistance=radius+1;
         foreach(axis,dir in [Vector(-1,0,0),Vector(1,0,0),Vector(0,1,0),Vector(0,-1,0)]) {
@@ -463,11 +525,22 @@ L4D2MCBridge.GroundPhysics <- function() {
 L4D2MCBridge.GameplayLease <- function() { return gameplay.armed && Time()-gameplay.at<=0.5; };
 L4D2MCBridge.ReadGameplay <- function(player) {
     local text=FileToString("l4d2mc_gameplay.txt");
-    if(text==null || text.len()>18000)return GameplayLease();
-    local lines=split(text,"\r\n");if(lines.len()<1 || lines.len()>256)return GameplayLease();
+    if(text==null || text.len()>32768)return GameplayLease();
+    local lines=split(text,"\r\n");if(lines.len()<1 || lines.len()>384)return GameplayLease();
     local header=split(lines[0]," ");
     if(header.len()!=9 || !CompleteMailbox(lines,header[3]))return GameplayLease();
-    if(header[1]!=Director.GetMapName() || header[8]!=epoch.tostring() || header[2]!="1")return false;
+    if(header[1]!=Director.GetMapName() || header[8]!=epoch.tostring())return false;
+    if(header[2]=="0" && TotemPendingFor(player)) {
+        if(header[0]!=gameplay.generation){gameplay.generation=header[0];gameplay.lastEvent=0;gameplay.content=null;gameplay.armed=false;}
+        // A spectating/dead frame permits only the existing durable rescue.
+        for(local i=1;i<lines.len()-1;i++) {
+            local f=split(lines[i]," ");
+            if(f.len()>=3 && f[0]=="event" && (f[2]=="totemresult" || f[2]=="replyack"))
+                try{Event(f,player);}catch(error){printl("[L4D2MC TOTEM] "+error);}
+        }
+        TotemTick(player);return true;
+    }
+    if(header[2]!="1")return false;
     if(header[0]!=gameplay.generation) {
         gameplay.generation=header[0];gameplay.lastEvent=0;gameplay.projectiles.clear();gameplay.replies.clear();gameplay.armed=false;gameplay.content=null;
     }
@@ -483,6 +556,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     if(text!=gameplay.content){gameplay.content=text;gameplay.at=Time();gameplay.armed=true;}
     if(!gameplay.armed)return false;
     if(Time()-gameplay.at>0.5)return false;
+    survival.fireZones.clear();
     for(local i=1;i<lines.len()-1;i++) {
         local f=split(lines[i]," ");
         if(f.len()>0 && f[0]=="event")try{Event(f,player);}catch(error){printl("[L4D2MC EVENT] "+error);}
@@ -492,6 +566,8 @@ L4D2MCBridge.ReadGameplay <- function(player) {
         else if(f.len()>0 && f[0]=="signal")try{Signal(f,player);}catch(error){printl("[L4D2MC SIGNAL] "+error);}
         else if(f.len()>0 && f[0]=="protection")try{ProtectionEquipment(f);}catch(error){printl("[L4D2MC PROTECTION] "+error);}
         else if(f.len()>0 && f[0]=="effects")try{Effects(f);}catch(error){printl("[L4D2MC EFFECTS] "+error);}
+        else if(f.len()>0 && f[0]=="fire")try{FireZone(f,player);}catch(error){printl("[L4D2MC FIRE] "+error);}
+        else if(f.len()>0 && f[0]=="totemheld")try{TotemHeld(f);}catch(error){printl("[L4D2MC TOTEM] "+error);}
         else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
         else if(f.len()>0 && f[0]=="physics")try{Physics(f,player);}catch(error){printl("[L4D2MC PHYSICS] "+error);}
     }
@@ -501,10 +577,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     GroundPhysics();
     SurvivalTick(player);
     try{NavTick();}catch(error){printl("[L4D2MC NAV] "+error);navigation.jobs.clear();}
-    if(NetProps.HasProp(player,"m_hActiveWeapon"))Hide(NetProps.GetPropEntity(player,"m_hActiveWeapon"));
-    if(NetProps.HasProp(player,"m_hViewModel")) {
-        for(local i=0;i<NetProps.GetPropArraySize(player,"m_hViewModel");i++)Hide(NetProps.GetPropEntityArray(player,"m_hViewModel",i));
-    }
+    HidePlayerWeapons(player);
     local stale=[];foreach(id,v in gameplay.projectiles)if(Time()-v.at>1)stale.append(id);
     foreach(id in stale)delete gameplay.projectiles[id];
     return true;

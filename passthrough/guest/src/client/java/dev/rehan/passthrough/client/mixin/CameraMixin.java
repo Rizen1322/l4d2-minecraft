@@ -71,7 +71,7 @@ abstract class CameraMixin {
 		this.setPosition(x, y, z);
 		// GTA pulls its camera in to the head against walls: then Minecraft's camera would be inside Steve's head
 		boolean inside = player != null && player.getEyePosition(partialTicks).distanceToSqr(x, y, z) < 0.8 * 0.8;
-		this.detached = !p.firstPerson() && !inside;
+		this.detached = !p.firstPerson() && (!inside || dev.rehan.passthrough.AvatarPosePolicy.prone(p.pin()));
 	}
 
 	@Inject(method = "calculateFov", at = @At("HEAD"), cancellable = true)

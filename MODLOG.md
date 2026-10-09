@@ -307,6 +307,29 @@ Minecraft process started by test. Java build and40Python tests pass. Fixed JAR
 installed and SHA256 matched. No saves modified/restored, no game launched;
 next normal user launch remains required for in-game confirmation.
 
+2026-10-09 F5/gameplay update, offline only: inventory/world/view weapon models
+hidden per owner and restored on drop. Steve uses survivor yaw for front F5;
+Hunter pin rotates body/armor/items prone. Teammate HUD Source card footprints
+are restored over guest shield/hand, disabled in guest GUI, count at pose+96.
+No world depth/reprojection changes. Actual vanilla guest FIRE now survives
+validated transient native floors; contact snapshots ignite Source actors,
+native entityflame or bounded fallback DOT, no native ground inferno. Totem
+held in either hand is durably consumed before native incap/defib rescueHP100,
+then animation35 after Source-applied receipt; inactive dead mailbox only
+accepts rescue result/ack. Whole-team-wipe before handshake remains unverified.
+Golems use fresh live targets, nearest48 host actors, ironcommon1hit/SI180,
+direct jump before move, low vehicle probes. TNT shallow floor embedding
+raises only body probe origin after confirmed floor, airborne fall preserved.
+Checkpoint RMB uses native use (bar removal), explicit guest intent with
+120ms pulse prevents lost taps and doors behind MC mob clicks. Full build:
+63Python/11JVM/6Source suites+x86PE, nine owned installed files SHA-verified.
+No games launched; FX runtime compilation/visual alignment not verified.
+Final read-only review found aggregate receipt budget could abort player saves;
+RewardLedger.stage now validates a copy before all chapter/pickup/totem costs
+or grants. Mixed-family regression passes without modifying rejected state.
+Guest package rebuilt with final vanilla DEATH_PROTECTION effects and installed
+again; reviewer found no remaining concrete P1/P2 blockers in these code paths.
+
 
 2026-10-09: Offline update requested without game launches. Added bounded
 Source navmesh routes (12 jobs,64 neighbor checks/think, actual stair floor and

@@ -17,14 +17,16 @@ final class SourcePursuitGoal extends Goal {
     private int attackCooldown,avoidTicks;
     private double side=1;
     SourcePursuitGoal(Mob mob){this.mob=mob;setFlags(EnumSet.of(Flag.MOVE,Flag.LOOK));}
-    @Override public boolean canUse(){return Passthrough.active && mob.getTarget()!=null
+    @Override public boolean canUse(){return Passthrough.active && MapBuilds.ready && mob.getTarget()!=null
         && mob.getTarget().isAlive() && MobWar.targetFor(mob,mob.getTarget());}
     @Override public boolean canContinueToUse(){return canUse();}
     @Override public boolean requiresUpdateEveryTick(){return true;}
     @Override public void start(){mob.getNavigation().stop();}
     @Override public void stop(){mob.getNavigation().stop();}
     @Override public void tick(){
-        var target=mob.getTarget();if(target==null)return;
+        var target=mob.getTarget();
+        if(target==null)return;
+        if(!MobWar.targetFor(mob,target)){mob.setTarget(null);return;}
         mob.getLookControl().setLookAt(target,30,30);
         double dx=target.getX()-mob.getX(),dz=target.getZ()-mob.getZ(),distance=Math.hypot(dx,dz);
         float yaw=(float)(Math.toDegrees(Math.atan2(dz,dx))-90);
@@ -39,7 +41,7 @@ final class SourcePursuitGoal extends Goal {
             if(wd>1e-4) {
                 double step=Math.min(wd,Math.clamp(mob.getAttributeValue(Attributes.MOVEMENT_SPEED),.08,.35));
                 mob.setYRot((float)(Math.toDegrees(Math.atan2(wz,wx))-90));mob.yBodyRot=mob.getYRot();
-                if(GolemOrders.golem(mob) && mob.onGround() && HostTerrain.lowLedge(mob,wx,wz))mob.getJumpControl().jump();
+                if(GolemOrders.golem(mob))HostTerrain.jumpLedge(mob,wx,wz);
                 mob.move(MoverType.SELF,new Vec3(wx/wd*step,0,wz/wd*step));
                 if(mob.horizontalCollision && ++avoidTicks>=20){HostNavigation.stuck(mob);avoidTicks=0;}
                 else if(!mob.horizontalCollision)avoidTicks=0;
@@ -53,7 +55,9 @@ final class SourcePursuitGoal extends Goal {
         if(mob instanceof RangedAttackMob shooter && clear && distance<=12 && attackCooldown==0) {
             shooter.performRangedAttack(target,1.0f);attackCooldown=40;return;
         }
-        if(!ranged && clear && distance<=reach && Math.abs(target.getY()-mob.getY())<2.5 && attackCooldown==0 && mob.level() instanceof ServerLevel level) {
+        // Source validates line of sight again at impact. A moving target need
+        // not wait for a navmesh reply about an obsolete pair of positions.
+        if(!ranged && distance<=reach && Math.abs(target.getY()-mob.getY())<2.5 && attackCooldown==0 && mob.level() instanceof ServerLevel level) {
             mob.swingForAttack(InteractionHand.MAIN_HAND);
             mob.doHurtTarget(level,target);
             attackCooldown=20;

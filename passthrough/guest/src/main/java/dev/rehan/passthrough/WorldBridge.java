@@ -41,11 +41,12 @@ public final class WorldBridge {
 	}
 
 	static void attach(final MinecraftServer s) {
-		server = s;changes.clear();
+		server = s;changes.clear();GuestFire.reset();
 	}
 
 	static void detach() {
 		saveMigration();
+        GuestFire.reset();
         clearTransient();
 		server = null;
 		barriers.clear();
@@ -262,6 +263,7 @@ public final class WorldBridge {
 		}
 
 		Nether.onBlockChanged(pos, state);
+        GuestFire.changed(pos,state);
         if(!placingGround)MapBuilds.changed(level,pos,state);
 		if (!placingGround) {
 			changes.put(pos.immutable(), solidForHost(level, pos, state));

@@ -5,6 +5,13 @@ from combat import GameplayMailbox,source_position
 
 
 class CombatTests(unittest.TestCase):
+    def test_mob_kind_survives_tunnel_for_golem_damage_and_rejects_tokens(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'mailbox')
+            box.apply({'t':'mobhit','h':4,'id':9,'d':7,'from':[0,0,0],'k':'iron_golem'})
+            box.publish('c1m1_hotel')
+            self.assertIn('mobhit 4 35.0 0 0 0 9 iron_golem',box.path.read_text())
+            with self.assertRaises(ValueError):box.apply({'t':'mobhit','h':4,'d':7,'from':[0,0,0],'k':'iron_golem;quit'})
     def test_enchantments_and_effects_expire_with_equipment(self):
         with tempfile.TemporaryDirectory() as d:
             box=GameplayMailbox(Path(d)/'effects')
@@ -151,6 +158,33 @@ class CombatTests(unittest.TestCase):
             with self.assertRaises(ValueError):box.apply({'t':'nav','id':True,'q':1,'from':[0,0,0],'goal':[0,0,0],'w':1,'h':2})
 
 class EnvironmentalTests(unittest.TestCase):
+    def test_totem_result_arrives_without_enabling_dead_player_controls(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'totem')
+            box.apply({'t':'interact'});box.apply({'t':'melee','d':10,'r':3})
+            box.apply({'t':'totemresult','key':'totem_7_2_900','consumed':True})
+            box.apply({'t':'replyack','id':9});box.publish('c1m1_hotel',active=False,attack=True,use=True)
+            text=box.path.read_text()
+            self.assertIn('totemresult totem_7_2_900 1',text);self.assertIn('replyack 9',text)
+            self.assertNotIn('interact',text);self.assertNotIn('melee',text)
+            for value in ['true',1,None]:
+                with self.assertRaises(ValueError):box.apply({'t':'totemresult','key':'totem_7_2_900','consumed':value})
+
+    def test_fire_snapshot_is_atomic_bounded_and_expires(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'fire')
+            with patch('combat.time.monotonic',return_value=10):
+                box.apply({'t':'fire','p':[[2,3.04,-5]]});box.publish('c1m1_hotel')
+                self.assertIn('fire 64 160 97.28',box.path.read_text())
+                for bad in [[[True,0,0]],[[0,0,float('nan')]],[[0,0,0]]*33]:
+                    with self.assertRaises(ValueError):box.apply({'t':'fire','p':bad})
+                self.assertEqual(box.fires,[(64,160,97.28)])
+            with patch('combat.time.monotonic',return_value=11):
+                box.publish('c1m1_hotel');self.assertNotIn('\nfire ',box.path.read_text())
+                box.apply({'t':'fire','p':[[2,3.04,-5]]});box.publish('c1m2_streets')
+                self.assertNotIn('\nfire ',box.path.read_text())
+
     def test_effects_expire_and_clear_at_map_change(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as d:

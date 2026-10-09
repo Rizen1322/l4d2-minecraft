@@ -17,6 +17,8 @@ class GameplayMailbox:
         self.path=path;self.generation=uuid.uuid4().hex[:12]
         self.epoch=0;self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
         self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={};self.protection=None;self.protection_at=0;self.effects=None;self.effects_at=0
+        self.fires=[];self.fires_at=0
+        self.totem_held=None;self.totem_at=0
 
     def apply(self,message):
         kind=message.get('t')
@@ -36,6 +38,19 @@ class GameplayMailbox:
         elif kind=='pteleport':event=('teleport',*source_position(message['pos']))
         elif kind=='chorus':event=('chorus',)
         elif kind=='ignite':event=('ignite',*source_position(message['pos']))
+        elif kind=='fire':
+            values=message.get('p')
+            if not isinstance(values,list) or len(values)>32:raise ValueError('invalid fire snapshot')
+            rows=[source_position(row) for row in values]
+            self.fires=rows;self.fires_at=time.monotonic()
+        elif kind=='totemheld':
+            held=message.get('held')
+            if type(held) is not bool:raise ValueError('invalid held totem')
+            self.totem_held=int(held);self.totem_at=time.monotonic()
+        elif kind=='totemresult':
+            key=message.get('key');consumed=message.get('consumed')
+            if not isinstance(key,str) or not key.startswith('totem_') or not 7<=len(key)<=118 or not all(c.isascii() and (c.isalnum() or c=='_') for c in key) or type(consumed) is not bool:raise ValueError('invalid totem result')
+            event=('totemresult',key,int(consumed))
         elif kind=='nav':
             ident=message.get('id');query=message.get('q');w=message.get('w');h=message.get('h')
             if type(ident) is not int or type(query) is not int or not 0<ident<2**31 or not 0<query<2**31:raise ValueError('invalid navigation identity')
@@ -88,7 +103,9 @@ class GameplayMailbox:
             if type(handle) is not int or not 0<handle<2**31 or not math.isfinite(d) or not 0<=d<=100:raise ValueError('invalid mob hit')
             attacker=message.get('id',0)
             if type(attacker) is not int or not 0<=attacker<2**31:raise ValueError('invalid attacker')
-            event=('mobhit',handle,d*5,*p,attacker)
+            kind_name=message.get('k','')
+            if not isinstance(kind_name,str) or len(kind_name)>48 or not all(c.isascii() and (c.isalnum() or c=='_') for c in kind_name):raise ValueError('invalid attacker kind')
+            event=('mobhit',handle,d*5,*p,attacker,*([kind_name] if kind_name else []))
         elif kind in ('mobs','proj'):
             source=message['m' if kind=='mobs' else 'p'];rows=[]
             if len(source)>256:raise ValueError('too many entities')
@@ -122,6 +139,8 @@ class GameplayMailbox:
         if not map_name or not all(c.isascii() and (c.isalnum() or c=='_') for c in map_name):raise ValueError('invalid map')
         if self.map is not None and self.map!=map_name:
             self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[];self.navigation.clear();self.protection=None;self.effects=None
+            self.fires=[];self.fires_at=0
+            self.totem_held=None;self.totem_at=0
         self.map=map_name
         records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)} {self.epoch}']
         if active:
@@ -131,6 +150,10 @@ class GameplayMailbox:
                 records+=[' '.join(map(str,('signal',*e))) for e in self.signals]
             if self.effects is not None and time.monotonic()-self.effects_at<0.75:
                 records.append(' '.join(map(str,('effects',*self.effects))))
+            if time.monotonic()-self.fires_at<0.75:
+                records+=[' '.join(map(str,('fire',*row))) for row in self.fires]
+            if self.totem_held is not None and time.monotonic()-self.totem_at<0.75:
+                records.append(f'totemheld {self.totem_held}')
             if self.protection is not None and time.monotonic()-self.protection_at<0.75:
                 records.append(' '.join(map(str,('protection',*self.protection))))
             if self.equipment is not None and time.monotonic()-self.equipment_at<0.75:
@@ -138,7 +161,11 @@ class GameplayMailbox:
             records+=[' '.join(map(str,('event',*e))) for e in self.events]
             records+=[' '.join(map(str,('projectile',*e))) for e in self.projectiles]
             records+=[' '.join(map(str,('physics',*e))) for e in self.physics]
+        else:
+            # A corpse/spectator has no controls, but a previously requested
+            # durable totem result and its reply acknowledgements must arrive.
+            records+=[' '.join(map(str,('event',*e))) for e in self.events if e[1] in ('totemresult','replyack')]
         records.append(f'end {records[0].split()[3]} {len(records)-1}')
         text='\n'.join(records)
-        if len(text)>18000:raise ValueError('mailbox too large')
+        if len(text)>32768:raise ValueError('mailbox too large')
         self.path.write_text(text,encoding='ascii')

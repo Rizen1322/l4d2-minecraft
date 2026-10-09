@@ -62,7 +62,7 @@ public final class PlayerSync {
 		player.yRotO = headYaw;
 		player.xRotO = headPitch;
 		player.yHeadRot = player.yHeadRotO = headYaw;
-		player.yBodyRot = player.yBodyRotO = p.firstPerson() ? p.yaw() : p.bodyYaw();
+		player.yBodyRot = player.yBodyRotO = dev.rehan.passthrough.AvatarPosePolicy.bodyYaw(p.firstPerson(),p.yaw(),p.lookYaw());
 		// the model stands exactly where the host's player is this frame (not a tick behind, interpolating)
 		double x = p.firstPerson() ? p.x() : p.px();
 		double y = p.firstPerson() ? p.y() - player.getEyeHeight() : p.py();

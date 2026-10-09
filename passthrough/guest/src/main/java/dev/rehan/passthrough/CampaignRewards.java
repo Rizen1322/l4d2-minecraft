@@ -20,7 +20,7 @@ public final class CampaignRewards {
             var reserve=data.reserve;
             var grant=RewardPolicy.items(chapter,finale,difficulty);
             for(var e:grant.entrySet())if(reserve.getOrDefault(e.getKey(),0)+e.getValue()>10000)return;
-            grant.forEach((item,count)->reserve.merge(item,count,Integer::sum));data.claimed.add(key);
+            if(!data.stage(candidate->{grant.forEach((item,count)->candidate.reserve.merge(item,count,Integer::sum));candidate.claimed.add(key);}))return;
             p.giveExperiencePoints(RewardPolicy.experience(finale));
             for(var slot:net.minecraft.world.entity.EquipmentSlot.values()) {
                 ItemStack stack=p.getItemBySlot(slot);
@@ -36,10 +36,14 @@ public final class CampaignRewards {
         // saveEverything returns chunk status; player IO failures can be swallowed by Minecraft.
         // Read back the actual atomic player file before clearing the Source outbox.
         try {
-            if(key.startsWith("pickup_"))s.getPlayerList().saveAll();else s.saveEverything(true,true,true);
+            if(key.startsWith("pickup_") || key.startsWith("totem_"))s.getPlayerList().saveAll();else s.saveEverything(true,true,true);
             var file=s.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("playerdata").resolve(p.getUUID()+".dat");
             var saved=net.minecraft.nbt.NbtIo.readCompressed(file,net.minecraft.nbt.NbtAccounter.create(32L*1024*1024));
             var ledger=RewardLedger.decode(saved.getString("l4d2mcRewards").orElseThrow());
+            if(key.startsWith("totem_")) {
+                var live=((RewardAccount)p).l4d2mc$rewards();
+                return live!=null && live.totems.containsKey(key) && java.util.Objects.equals(ledger.totems.get(key),live.totems.get(key));
+            }
             return (key.startsWith("pickup_")?ledger.pickups:ledger.claimed).contains(key);
         }catch(Exception ex){Passthrough.LOG.error("Reward receipt not durable; Source outbox retained",ex);return false;}
     }

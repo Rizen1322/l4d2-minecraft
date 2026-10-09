@@ -22,7 +22,7 @@ public final class SurvivalFeatures {
     private static long burnUntil;
     private static volatile boolean guestBurning;
     public static boolean burning(){return guestBurning;}
-    public static void resetEnvironment(){burnUntil=0;guestBurning=false;lastIgnition=0;}
+    public static void resetEnvironment(){burnUntil=0;guestBurning=false;lastIgnition=0;GuestFire.reset();}
     private static java.util.UUID burnPlayer;
     public static void register(){
         CommandRegistrationCallback.EVENT.register((dispatcher,access,environment)-> {
@@ -71,6 +71,7 @@ public final class SurvivalFeatures {
         if(++ticks%4!=0 || !Passthrough.active || !MapBuilds.ready || !privateWorld(s))return;
         var players=s.getPlayerList().getPlayers();if(players.isEmpty())return;ServerPlayer p=players.getFirst();
         Passthrough.events.accept(GuestMessages.equipment(p.getArmorValue(),p.getAttributeValue(Attributes.ARMOR_TOUGHNESS),p.isBlocking()));
+        Passthrough.events.accept("{\"t\":\"totemheld\",\"held\":"+GuestTotems.held(p)+"}");
         var sources=p.damageSources();
         var general=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.generic());
         var fire=net.minecraft.world.item.enchantment.EnchantmentHelper.getDamageProtection(p.level(),p,sources.inFire());
@@ -95,6 +96,7 @@ public final class SurvivalFeatures {
         if(p.isInWaterOrRain() || p.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE))burnUntil=0;
         guestBurning=now<burnUntil;
         Passthrough.events.accept(String.format(java.util.Locale.ROOT,"{\"t\":\"effects\",\"speed\":%.3f,\"burn\":%b}",factor,now<burnUntil));
+        GuestFire.report(p);
         CampaignRewards.deliver(s,p);
         // Prevent independent Minecraft death/starvation; Source is authoritative.
         p.getAbilities().invulnerable=true;
@@ -112,17 +114,22 @@ public final class SurvivalFeatures {
             p.setAbsorptionAmount(incap?0:(float)Math.clamp(temporary/maximum*20,0,20));
         });
     }
-    public static void igniteSurface(double x,double y,double z){
+    public static void igniteSurface(double x,double y,double z,net.minecraft.core.BlockPos cell){
         MinecraftServer s=WorldBridge.server();if(s==null || !Double.isFinite(x+y+z))return;
+        long scene=MapBuilds.scene();
         WorldBridge.serverWork(s,()->{
-            if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
+            if(!Passthrough.active || !MapBuilds.ready || MapBuilds.scene()!=scene || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
             ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
-            if(p.distanceToSqr(x,y,z)>36 || System.nanoTime()-lastIgnition<350_000_000L)return;
+            if(p.distanceToSqr(x,y,z)>36 || Math.abs(cell.getX()-x)>1 || Math.abs(cell.getY()-y)>.501 || Math.abs(cell.getZ()-z)>1
+                || System.nanoTime()-lastIgnition<350_000_000L)return;
             var hand=p.getMainHandItem().is(Items.FLINT_AND_STEEL)?InteractionHand.MAIN_HAND:InteractionHand.OFF_HAND;
             ItemStack tool=p.getItemInHand(hand);if(!tool.is(Items.FLINT_AND_STEEL))return;
-            lastIgnition=System.nanoTime();
-            if(!p.isCreative())tool.hurtAndBreak(1,p,hand);
-            Passthrough.events.accept(String.format(java.util.Locale.ROOT,"{\"t\":\"ignite\",\"pos\":[%.4f,%.4f,%.4f]}",x,y,z));
+            if(!GuestFire.reserve(p.level(),cell,y))return;
+            try {
+                var hit=new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(x,y,z),net.minecraft.core.Direction.UP,cell.below(),false);
+                var result=tool.useOn(new net.minecraft.world.item.context.UseOnContext(p,hand,hit));
+                if(result.consumesAction())lastIgnition=System.nanoTime();
+            }finally{if(!p.level().getBlockState(cell).is(net.minecraft.tags.BlockTags.FIRE))GuestFire.release(cell);}
         });
     }
     public static void equipmentHit(int amount,boolean shield){
@@ -182,9 +189,11 @@ public final class SurvivalFeatures {
                 var grant=PickupPolicy.items(kind);if(grant.isEmpty())return;
                 if(account.reserve.size()+grant.keySet().stream().filter(item->!account.reserve.containsKey(item)).count()>32)return;
                 for(var e:grant.entrySet())if(account.reserve.getOrDefault(e.getKey(),0)+e.getValue()>10000)return;
-                grant.forEach((item,count)->account.reserve.merge(item,count,Integer::sum));
-                if(account.pickups.size()>=512)account.pickups.remove(account.pickups.iterator().next());
-                account.pickups.add(key);
+                if(!account.stage(candidate->{
+                    grant.forEach((item,count)->candidate.reserve.merge(item,count,Integer::sum));
+                    if(candidate.pickups.size()>=512)candidate.pickups.remove(candidate.pickups.iterator().next());
+                    candidate.pickups.add(key);
+                }))return;
             }
             CampaignRewards.deliver(s,p);
             if(CampaignRewards.checkpoint(s,p,key))Passthrough.events.accept("{\"t\":\"pickupack\",\"key\":\""+key+"\"}");

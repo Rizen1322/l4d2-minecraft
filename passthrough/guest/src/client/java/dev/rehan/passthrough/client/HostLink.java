@@ -101,7 +101,7 @@ public final class HostLink extends WebSocketServer {
 
     private static final java.util.Set<String> SOURCE_TASKS=java.util.Set.of(
         "hosthealth","peds","physground","projhit","equipmenthit","shieldcooldown","breakblock",
-        "mobdmg","mobpos","navpath","supply","blocksync");
+        "mobdmg","mobpos","navpath","supply","blocksync","totemrequest","totemapplied");
     private final dev.rehan.passthrough.ReplyTracker replies=new dev.rehan.passthrough.ReplyTracker();
     private void ackReply(int rid){Passthrough.events.accept("{\"t\":\"replyack\",\"id\":"+rid+"}");}
     private void queueSource(WebSocket conn,JsonObject m){
@@ -172,6 +172,8 @@ public final class HostLink extends WebSocketServer {
                 case "equipmenthit" -> dev.rehan.passthrough.SurvivalFeatures.equipmentHit(m.get("d").getAsInt(),m.get("shield").getAsBoolean());
                 case "shieldcooldown" -> dev.rehan.passthrough.SurvivalFeatures.shieldCooldown(m.get("ticks").getAsInt());
                 case "pickup" -> dev.rehan.passthrough.SurvivalFeatures.pickup(m.get("item").getAsString(),m.get("key").getAsString());
+                case "totemrequest" -> dev.rehan.passthrough.GuestTotems.consume(m.get("key").getAsString());
+                case "totemapplied" -> dev.rehan.passthrough.GuestTotems.applied(m.get("key").getAsString());
                 case "supply" -> {
                     JsonArray p=m.getAsJsonArray("pos");dev.rehan.passthrough.SurvivalFeatures.supply(p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble(),m.get("kind").getAsInt());
                 }

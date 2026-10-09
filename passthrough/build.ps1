@@ -30,5 +30,8 @@ if (Test-Path -LiteralPath 'toolchains/squirrel-parser/sq.exe') {
     }
     Invoke-CheckedSquirrel -CheckArguments @('passthrough/test_protection.nut') -Success 'Source protection arithmetic passed'
     Invoke-CheckedSquirrel -CheckArguments @('passthrough/test_surfaces.nut') -Success 'Retail floor/nav and shield capacity regressions passed'
+    Invoke-CheckedSquirrel -CheckArguments @('passthrough/test_weapon_visibility.nut') -Success 'Third-person weapon and drop visibility regressions passed'
+    Invoke-CheckedSquirrel -CheckArguments @('passthrough/test_native_use.nut') -Success 'Native checkpoint press/hold and carry-drop regressions passed'
+    Invoke-CheckedSquirrel -CheckArguments @('passthrough/test_golem.nut') -Success 'Source golem one-hit, corpse and wall regressions passed'
     Invoke-CheckedSquirrel -CheckArguments @('passthrough/test_collision_protocol.nut') -Success 'Actual collision/gameplay framing and epoch regressions passed'
 }

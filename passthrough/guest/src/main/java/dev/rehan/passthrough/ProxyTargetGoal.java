@@ -7,7 +7,8 @@ import net.minecraft.world.entity.npc.villager.Villager;
 /** Hunt the nearest host person's proxy: invisible, and often behind host walls Minecraft can't see, so neither counts. */
 final class ProxyTargetGoal extends NearestAttackableTargetGoal<Villager> {
 	ProxyTargetGoal(final Mob mob) {
-		super(mob, Villager.class, 10, false, false, (target, level) -> MobWar.targetFor(mob,target));
+		super(mob, Villager.class, 0, false, false, (target, level) -> MobWar.targetFor(mob,target));
 		this.targetConditions.ignoreInvisibilityTesting().ignoreLineOfSight();
 	}
+    @Override public boolean canContinueToUse(){return mob.getTarget()!=null && MobWar.targetFor(mob,mob.getTarget()) && super.canContinueToUse();}
 }

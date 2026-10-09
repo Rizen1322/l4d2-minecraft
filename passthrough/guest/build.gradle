@@ -91,6 +91,13 @@ tasks.register('verifyFramePublishPolicy', JavaExec) {
 }
 check.dependsOn verifyFramePublishPolicy
 
+tasks.register('verifyAvatarPosePolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.AvatarPosePolicyTest'
+}
+check.dependsOn verifyAvatarPosePolicy
+
 tasks.register('verifyEquipmentWearPolicy', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
@@ -111,3 +118,10 @@ tasks.register('verifyServerDispatchPolicy', JavaExec) {
     mainClass = 'dev.rehan.passthrough.ServerDispatchPolicyTest'
 }
 check.dependsOn verifyServerDispatchPolicy
+
+tasks.register('verifyProxyPresence', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.ProxyPresenceTest'
+}
+check.dependsOn verifyProxyPresence

@@ -58,6 +58,7 @@ public final class MobWar {
 	private static final Map<Integer, Villager> proxies = new HashMap<>();
 	private static final Map<Integer, Integer> handleOf = new HashMap<>();
     private static final Map<Integer, Integer> factionOf = new HashMap<>();
+    private static final ProxyPresence presence=new ProxyPresence();
 	private static final Map<Integer, Integer> missingTicks = new HashMap<>();
 	private static boolean reportedMobs;
 
@@ -82,7 +83,9 @@ public final class MobWar {
 	}
 
     public static boolean targetFor(final Mob mob, final LivingEntity target) {
-        if(!isProxy(target))return false;
+        if(!isProxy(target) || !target.isAlive() || target.isRemoved())return false;
+        Integer handle=handleOf.get(target.getId());
+        if(handle==null || !presence.targetable(handle,System.nanoTime()))return false;
         Integer faction=factionOf.get(target.getId());
         if(faction==null)return false;
         String kind=BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath();
@@ -128,6 +131,7 @@ public final class MobWar {
 
 	/** A proxy was hurt (server thread, from LivingEntity.hurtServer; the damage itself is always cancelled). */
 	public static void onProxyHit(final LivingEntity proxy, final DamageSource source, final float amount) {
+		if(!Passthrough.active || !MapBuilds.ready)return;
 		Integer handle = handleOf.get(proxy.getId());
 		Entity attacker = source.getEntity();
 		if (source.getDirectEntity() instanceof Projectile projectile && !(attacker instanceof Player)) {
@@ -199,6 +203,7 @@ public final class MobWar {
             factionOf.put(v.getId(),(int)p[i+4]);
 			missingTicks.remove(handle);
 		}
+        presence.update(seen.keySet(),System.nanoTime());
 
 		// hysteresis: a person missing from a few lists in a row (out of range, dead, despawned) loses their proxy
 		for (Iterator<Map.Entry<Integer, Villager>> it = proxies.entrySet().iterator(); it.hasNext();) {
@@ -262,6 +267,7 @@ public final class MobWar {
 		StringBuilder b = new StringBuilder("{\"t\":\"mobs\",\"m\":[");
 		int n = 0;
 		for (Entity e : near) {
+			if(e instanceof Mob mob && mob.getTarget()!=null && isProxy(mob.getTarget()) && !targetFor(mob,mob.getTarget()))mob.setTarget(null);
 			if (!e.isAlive()) {
 				continue;
 			}
@@ -356,7 +362,7 @@ public final class MobWar {
 	}
 
 	private static void clearProxies() {
-        peds.set(null);damage.clear();
+        peds.set(null);damage.clear();presence.clear();
 		proxies.values().forEach(Entity::discard);
 		proxies.clear();
 		handleOf.clear();

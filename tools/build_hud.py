@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import struct
 import subprocess
+import hud_layout
 
 ROOT=Path(__file__).resolve().parents[1]
 GAME=Path(r'E:\SteamLibrary\steamapps\common\Left 4 Dead 2')
@@ -53,11 +54,11 @@ def build(game=GAME):
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeaponSelection',{'xpos':3000,'visible':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeapon',{'visible':0,'enabled':0,'wide':0,'tall':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'CHudTeamDisplay',
-                                            {'xpos':5,'ypos':'r205','wide':116,'tall':205})
+                                            {'xpos':hud_layout.X,'ypos':f'r{hud_layout.BOTTOM}','wide':116,'tall':hud_layout.BOTTOM})
     for name in ('teamdisplayhud','teamdisplayhud_vertical'):
         key=f'resource/ui/hud/{name}.res'
         for i in range(1,5):
-            files[key]=patch_panel(files[key],f'TeamPlayer{i}',{'xpos':0,'ypos':(4-i)*49,'wide':112,'tall':70,'pinCorner':0})
+            files[key]=patch_panel(files[key],f'TeamPlayer{i}',{'xpos':0,'ypos':(4-i)*hud_layout.STRIDE,'wide':hud_layout.WIDTH,'tall':70,'pinCorner':0})
     for name in ('teammatepanel','teammatepanel_incap'):
         key=f'resource/ui/hud/{name}.res'
         def scale(m):
@@ -71,6 +72,7 @@ def build(game=GAME):
     subprocess.run([str(game/'bin/vpk.exe'),str(stage)],cwd=ROOT,check=True,capture_output=True)
     package=stage.with_suffix('.vpk')
     if not package.is_file():raise RuntimeError('HUD package missing')
+    (ROOT/'passthrough/shaders/TeamHud.fxh').write_text(hud_layout.shader_header(),encoding='utf-8')
     print('Private HUD package:',package)
     return package
 

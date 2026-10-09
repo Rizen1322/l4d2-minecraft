@@ -361,7 +361,9 @@ def camera(sample, aspect):
     # Source's fov is horizontal at the reference 4:3 aspect, expanded for widescreen.
     # The vertical fov thus uses 4:3, rather than current aspect.
     vfov = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) / (4 / 3)))
-    return {"t": "cam", "f": int(sample["f"]), "p": position(sample["p"]),
+    pin=sample.get('pin','none')
+    if pin not in ('none','hunter','jockey','smoker','charger'):pin='none'
+    return {"t": "cam", "pin":pin,"teammates":max(0,min(3,int(sample.get('teammates',0)))), "f": int(sample["f"]), "p": position(sample["p"]),
             "pl": position(sample["feet"]), "r": [-yaw - 90, pitch, -roll],
             "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"carrying":bool(sample.get("carrying",False)),"burning":bool(sample.get("burning",False)),"sneak":bool(sample.get("buttons",0)&4)}
 
@@ -410,6 +412,7 @@ class PoseMemory:
         self.memory[:len(packet)] = packet
         struct.pack_into("<I", self.memory, 84, int(pose.get("visible",True)))
         struct.pack_into("<Q", self.memory, 88, pose.get("scene",0))
+        struct.pack_into("<I", self.memory, 96, pose.get("teammates",0))
         struct.pack_into("<I", self.memory, 4, self.sequence)
 
 
@@ -551,6 +554,8 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 guest_map=session;map_ready=False
                                 collision.cells.clear();collision.scene=scene_token(*session);collision.epoch=session[1];gameplay.epoch=session[1]
                                 gameplay.effects=None
+                                gameplay.fires=[];gameplay.fires_at=0
+                                gameplay.totem_held=False;gameplay.totem_at=0
                                 sync_after=None;next_sync=0.0;synced=False;sync_id=time.monotonic_ns()
                                 gameplay.events.clear();gameplay.mobs.clear();gameplay.physics.clear();gameplay.projectiles.clear()
                                 gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[];gameplay.protection=None

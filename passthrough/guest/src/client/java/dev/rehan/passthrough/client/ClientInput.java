@@ -121,7 +121,7 @@ final class ClientInput {
                     boolean guestHit=minecraft.hitResult instanceof EntityHitResult
                         || (minecraft.hitResult instanceof BlockHitResult hit && !player.level().getBlockState(hit.getBlockPos()).isAir());
                     if(!guestHit && ground!=null && ground.face()==net.minecraft.core.Direction.UP && player.getEyePosition().distanceToSqr(ground.pos())<=25) {
-                        dev.rehan.passthrough.SurvivalFeatures.igniteSurface(ground.pos().x,ground.pos().y,ground.pos().z);
+                        dev.rehan.passthrough.SurvivalFeatures.igniteSurface(ground.pos().x,ground.pos().y,ground.pos().z,ground.cell());
                         return;
                     }
                 }

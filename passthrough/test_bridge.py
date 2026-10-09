@@ -93,6 +93,14 @@ class InputTests(unittest.TestCase):
 
 
 class CameraTests(unittest.TestCase):
+    def test_pin_kind_and_native_team_card_count_survive_camera_relay(self):
+        sample={"v":1,"f":1,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"pin":"hunter","teammates":3}
+        pose=camera(sample,16/9)
+        self.assertEqual(pose['pin'],'hunter');self.assertEqual(pose['teammates'],3)
+        sample.update(pin='unknown',teammates=20)
+        pose=camera(sample,16/9)
+        self.assertEqual(pose['pin'],'none');self.assertEqual(pose['teammates'],3)
+
     def test_cutscene_visibility_survives_camera_conversion(self):
         sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"visible":False}
         self.assertFalse(camera(sample,16/9)['visible'])

@@ -9,6 +9,8 @@ def update(game=GAME):
     files=[(ROOT/'passthrough/guest/build/libs/passthrough-0.1.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
            (ROOT/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
+    files += [(ROOT/'passthrough/shaders'/name,game/'bin/l4d2mc/shaders'/name)
+              for name in ('L4D2Minecraft.fx','TeamHud.fxh')]
     files += [(ROOT/'passthrough/host'/name,game/'left4dead2/scripts/vscripts'/name)
               for name in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut')]
     pending=[]
@@ -19,7 +21,7 @@ def update(game=GAME):
         except PermissionError:pending.append(str(target));continue
         if digest(source)!=digest(target):raise RuntimeError('Installed hash mismatch: '+str(target))
     if pending:raise RuntimeError('Close games before applying locked components: '+', '.join(pending))
-    print('Seven mashup components verified; no games started.')
+    print('Nine mashup components verified; no games started.')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--game',type=Path,default=GAME)

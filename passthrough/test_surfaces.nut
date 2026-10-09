@@ -87,4 +87,57 @@ player.EyePosition<-function(){return Vec(0,0,64);};
 player.EyeAngles<-function(){return {Forward=function(){return Vec(1,0,0);}};};
 b.Event(["event","1","melee","105","96","1","1"],player);
 if(hits.len()!=2 || hits[0][0]!=1 || hits[1][0]!=2 || hits[0][1]!=101 || hits[1][1]!=101)throw "Sword cleave hit ally, wall, rear or failed one-hit common";
+local floorSpawns=0;::DropFire<-function(p){floorSpawns++;};
+b.IgniteGround(["event","2","ignite","0","0","0"],player);
+if(floorSpawns!=0)throw "Flint created native ground fire";
+if(!b.FireOverlap(Vec(0,0,0),Vec(-8,-24,0),Vec(8,-8,72)))throw "Fire missed body standing in cell";
+if(b.FireOverlap(Vec(0,0,0),Vec(40,-24,0),Vec(56,-8,72)))throw "Fire hit outside cell";
+if(b.FireOverlap(Vec(0,0,0),Vec(-8,-24,40),Vec(8,-8,112)))throw "Fire hit actor on another floor";
+class BurningTarget extends Target {
+    name="";function GetName(){return name;}
+    function __KeyValueFromString(k,v){name=v;}
+    function GetEntityIndex(){return id;}
+}
+targets=[BurningTarget(10,"infected",Vec(8,-16,0)),BurningTarget(11,"player",Vec(8,-16,0),true)];
+Entities.Next<-function(previous){return null;};
+::UniqueString<-function(prefix){return prefix;};local ignitions=[];
+::EntFire<-function(name,input,value,delay,activator){ignitions.append([name,input,value]);};
+b.Raycast=function(start,end,ignore){return {hit=false};};hits.clear();
+b.FireZone(["fire","0","0","0"],player);b.FireTick(player);
+if(ignitions.len()!=2 || ignitions[0][1]!="IgniteLifetime" || hits.len()!=0)throw "Fire contact failed native ignite or doubled initial damage";
+now=6.4;b.FireTick(player);
+if(hits.len()!=2 || hits[0][1]+hits[1][1]!=12)throw "Missing native flame did not receive fallback burn damage";
+b.survival.fireZones.clear();now=11;b.FireTick(player);
+if(b.survival.fireActors.len()!=0)throw "Fire contact continued after expiration";
+class RescuePlayer {
+    hp=0;dead=false;incap=true;revives=0;fail=false;
+    function IsValid(){return true;}function GetEntityIndex(){return 22;}
+    function GetHealth(){return hp;}function SetHealth(h){hp=h;}
+    function IsDead(){return dead;}function IsIncapacitated(){return incap;}
+    function IsHangingFromLedge(){return false;}
+    function ReviveFromIncap(){revives++;if(!fail)incap=false;}
+    function ReviveByDefib(){revives++;if(!fail){dead=false;incap=false;}}
+}
+local rescued=RescuePlayer(),notices=[];b.Reply=function(body){notices.append(body);};
+b.gameplay.armed=true;b.gameplay.at=now;b.survival.player=rescued;
+b.TotemRequest(rescued);
+if(b.survival.totemPending!=null)throw "Rescue requested without held totem";
+b.TotemHeld(["totemheld","1"]);b.TotemRequest(rescued);
+local rejected=b.survival.totemPending.key;
+b.TotemResult(["event","1","totemresult",rejected,"0"],rescued);
+if(rescued.revives!=0 || b.survival.totemPending!=null)throw "Unconsumed totem granted free revive";
+b.TotemHeld(["totemheld","1"]);b.TotemRequest(rescued);
+local consumed=b.survival.totemPending.key;
+local mailbox="owner map 0 777 0 0 0 0 "+b.epoch+"\nevent 500 interact\nevent 501 totemresult "+consumed+" 1\nend 777 2";
+::FileToString<-function(path){return mailbox;};::Director<-{GetMapName=function(){return "map";}};
+if(!b.ReadGameplay(rescued) || rescued.hp!=100 || rescued.incap || rescued.revives!=1)throw "Inactive-frame totem transaction failed";
+b.TotemResult(["event","502","totemresult",consumed,"1"],rescued);
+if(rescued.revives!=1)throw "Repeated totem result revived twice";
+rescued.hp=0;rescued.dead=true;rescued.fail=true;b.gameplay.armed=true;b.gameplay.at=now;
+b.TotemHeld(["totemheld","1"]);b.TotemRequest(rescued);
+local finalKey=b.survival.totemPending.key,noticeCount=notices.len();
+b.TotemResult(["event","503","totemresult",finalKey,"1"],rescued);
+if(notices.len()!=noticeCount || b.survival.totemPending==null)throw "Failed native defib falsely announced success";
+rescued.fail=false;b.TotemResult(["event","504","totemresult",finalKey,"1"],rescued);
+if(rescued.hp!=100 || rescued.dead || notices.top().find("totemapplied")==null)throw "Native defib rescue did not confirm HP100";
 print("Retail floor/nav and shield capacity regressions passed\n");

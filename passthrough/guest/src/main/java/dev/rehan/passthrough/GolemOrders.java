@@ -54,7 +54,7 @@ public final class GolemOrders extends Goal {
         double step=Math.min(d,Math.clamp(mob.getAttributeValue(Attributes.MOVEMENT_SPEED),.08,.3));
         double mx=dx/d*step,mz=dz/d*step;
         mob.setYRot((float)(Math.toDegrees(Math.atan2(mz,mx))-90));mob.yBodyRot=mob.getYRot();
-        if(mob.onGround() && HostTerrain.lowLedge(mob,mx,mz))mob.getJumpControl().jump();
+        HostTerrain.jumpLedge(mob,mx,mz);
         mob.move(MoverType.SELF,new Vec3(mx,0,mz));
         if(mob.horizontalCollision && ++avoid>=20){HostNavigation.stuck(mob);avoid=0;}
         else if(!mob.horizontalCollision)avoid=0;

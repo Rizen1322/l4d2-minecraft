@@ -98,7 +98,7 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
     local player = null;
     local entity = null;
     while ((entity = Entities.FindByClassname(entity, "player")) != null) {
-        if (!IsPlayerABot(entity) && entity.IsSurvivor() && !entity.IsDead()) {
+        if (!IsPlayerABot(entity) && entity.IsSurvivor() && (!entity.IsDead() || ("TotemPendingFor" in L4D2MCBridge && L4D2MCBridge.TotemPendingFor(entity)))) {
             player = entity; break;
         }
     }
@@ -143,9 +143,13 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
             }
         }
     }
-    local pinned=false;
-    foreach(prop in ["m_pounceAttacker","m_jockeyAttacker","m_tongueOwner","m_carryAttacker","m_pummelAttacker"])
-        if(NetProps.HasProp(player,prop) && NetProps.GetPropEntity(player,prop)!=null)pinned=true;
+    local pinned=false,pin="none";
+    foreach(pair in [["m_pounceAttacker","hunter"],["m_jockeyAttacker","jockey"],["m_tongueOwner","smoker"],["m_carryAttacker","charger"],["m_pummelAttacker","charger"]])
+        if(NetProps.HasProp(player,pair[0]) && NetProps.GetPropEntity(player,pair[0])!=null) {pinned=true;pin=pair[1];break;}
+    local teammates=0,teammate=null;
+    while((teammate=Entities.FindByClassname(teammate,"player"))!=null)
+        if(teammate!=player && teammate.IsSurvivor())teammates++;
+    if(teammates>3)teammates=3;
     local visible=true;
     if(NetProps.HasProp(player,"m_hViewEntity")) {
         local view=NetProps.GetPropEntity(player,"m_hViewEntity");
@@ -167,6 +171,7 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
     data=data.slice(0,data.len()-1)+",\"burning\":"+(burning?"true":"false")+"}";
     data=data.slice(0,data.len()-1)+",\"carrying\":"+(carrying?"true":"false")+"}";
     data=data.slice(0,data.len()-1)+",\"pinned\":"+(pinned?"true":"false")+"}";
+    data=data.slice(0,data.len()-1)+format(",\"pin\":\"%s\",\"teammates\":%d}",pin,teammates);
     data=data.slice(0,data.len()-1)+format(",\"epoch\":%d}",L4D2MCBridge.epoch);
     local maxHp=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;
     local temporary=NetProps.HasProp(player,"m_healthBuffer")?NetProps.GetPropFloat(player,"m_healthBuffer"):0.0;

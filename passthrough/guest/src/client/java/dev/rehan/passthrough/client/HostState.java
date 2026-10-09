@@ -20,7 +20,7 @@ public final class HostState {
 	public record Pose(
 		long hostFrame, double x, double y, double z, float yaw, float pitch, float roll, float fov,
 		boolean firstPerson, double px, double py, double pz, float bodyYaw, long receivedNanos,
-		boolean drive, float lookYaw, float lookPitch, boolean gun, long scene
+		boolean drive, float lookYaw, float lookPitch, boolean gun, long scene, String pin
 	) {
 	}
 
@@ -81,7 +81,8 @@ public final class HostState {
 			m.has("look") ? m.getAsJsonArray("look").get(0).getAsFloat() : yaw,
 			m.has("look") ? m.getAsJsonArray("look").get(1).getAsFloat() : r.get(1).getAsFloat(),
 			m.has("gun") && m.get("gun").getAsBoolean(),
-            m.has("scene")?m.get("scene").getAsLong():0
+            m.has("scene")?m.get("scene").getAsLong():0,
+            m.has("pin")?m.get("pin").getAsString():"none"
 		);
 	}
 

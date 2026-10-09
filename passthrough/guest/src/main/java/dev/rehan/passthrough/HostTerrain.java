@@ -97,6 +97,10 @@ public final class HostTerrain {
         double rise=s.tops[axis]-mob.getY();
         return gap<.5 && gap>-.2 && rise>.05 && rise<=1.01;
     }
+    /** JumpControl defers jumping; the direct horizontal move can clear onGround first. */
+    public static void jumpLedge(Mob mob,double mx,double mz){
+        if(mob.onGround() && lowLedge(mob,mx,mz))mob.jumpFromGround();
+    }
     public static List<VoxelShape> shapes(Entity e,AABB query){
         if(!Passthrough.active || e==null || e instanceof Player || MobWar.isProxy(e))return List.of();
         boolean client=e.level().isClientSide();
