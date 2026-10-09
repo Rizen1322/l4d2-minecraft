@@ -2,12 +2,13 @@
 import json
 import argparse
 from pathlib import Path
-from install import ROOT,GAME,GUEST,RECEIPT,digest,install_file
+from install import ROOT,GAME,GUEST,RECEIPT,digest,install_file,preflight_file,recover_pending
 from runtime_paths import game_path
 
 def update(game=GAME):
     game=game_path(game)
     manifest=json.loads(RECEIPT.read_text(encoding='utf-8'))
+    recover_pending(manifest)
     files=[(ROOT/'passthrough/guest/build/libs/passthrough-0.1.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
            (ROOT/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
@@ -16,6 +17,11 @@ def update(game=GAME):
     files += [(ROOT/'passthrough/host'/name,game/'left4dead2/scripts/vscripts'/name)
               for name in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut')]
     pending=[]
+    # Validate every payload/ownership before replacing any component.
+    for source,target in files:
+        if not source.is_file():raise RuntimeError('Build component missing: '+str(source))
+        if target.exists() and digest(target)==digest(source):continue
+        preflight_file(source,target,manifest)
     for source,target in files:
         if not source.is_file():raise RuntimeError('Build component missing: '+str(source))
         if target.exists() and digest(target)==digest(source):continue

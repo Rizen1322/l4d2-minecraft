@@ -5,6 +5,8 @@ import hashlib
 import json
 import shutil
 import urllib.request
+import os
+import tempfile
 from runtime_paths import game_path, minecraft_path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,20 +39,102 @@ def validate_reshade(path):
         if 'binary' in locals():binary.close()
 
 
-def install_file(source, target, manifest):
-    key = str(target)
+def preflight_file(source,target,manifest):
+    if not source.is_file():raise RuntimeError('Build component missing: '+str(source))
+    key = str(target.absolute())
     if target.exists() and key not in manifest:
         if digest(target) != digest(source):
             raise RuntimeError(f"Existing unowned file: {target}")
-        print(f'Preserved identical pre-existing file without taking ownership: {target}')
-        return
+        return False
     elif target.exists() and digest(target) != manifest[key]:
         raise RuntimeError(f"Installed file was changed externally: {target}")
+    return True
+
+def atomic_json(path,value):
+    path.parent.mkdir(parents=True,exist_ok=True)
+    descriptor,filename=tempfile.mkstemp(prefix='.l4d2mc-receipt-',dir=path.parent)
+    temporary=Path(filename)
+    try:
+        with os.fdopen(descriptor,'w',encoding='utf-8') as output:
+            json.dump(value,output,indent=2);output.flush();os.fsync(output.fileno())
+        os.replace(temporary,path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+def atomic_receipt(manifest):
+    atomic_json(RECEIPT,manifest)
+
+def pending_path():
+    return RECEIPT.with_name(RECEIPT.name+'.pending')
+
+def recover_pending(manifest):
+    journal=pending_path()
+    if not journal.exists():return
+    value=json.loads(journal.read_text(encoding='utf-8'))
+    key=value['target'];target=Path(key);before=value['before'];after=value['after']
+    def valid_hash(h):return isinstance(h,str) and len(h)==64 and all(c in '0123456789abcdef' for c in h)
+    if not target.is_absolute() or not valid_hash(after) or (before is not None and not valid_hash(before)) or type(value['owned']) is not bool:
+        raise RuntimeError('Invalid pending install journal; files preserved')
+    prior_ok=(key in manifest)==value['owned'] and manifest.get(key)==value['record']
+    committed=manifest.get(key)==after
+    if not prior_ok and not committed:raise RuntimeError('Pending install receipt changed externally; files preserved')
+    current=digest(target) if target.exists() else None
+    if current==after:
+        manifest[key]=after;atomic_receipt(manifest)
+    elif current==before and prior_ok:
+        pass # Replacement never happened or ordinary rollback completed.
+    else:raise RuntimeError('Pending install target changed externally; files preserved')
+    if value.get('backup'):
+        backup=Path(value['backup'])
+        if backup.parent==target.parent and backup.name.startswith('.l4d2mc-rollback-') and backup.is_file() and digest(backup)==before:
+            backup.unlink()
+    journal.unlink()
+
+def install_file(source,target,manifest):
+    recover_pending(manifest)
+    if not preflight_file(source,target,manifest):
+        print(f'Preserved identical pre-existing file without taking ownership: {target}')
+        return
+    key=str(target.absolute())
+    original=digest(target) if target.exists() else None
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-    manifest[key] = digest(target)
-    RECEIPT.parent.mkdir(parents=True, exist_ok=True)
-    RECEIPT.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    descriptor,filename=tempfile.mkstemp(prefix='.l4d2mc-',dir=target.parent)
+    os.close(descriptor);temporary=Path(filename)
+    backup=None;keep_backup=False
+    had_record=key in manifest;old_record=manifest.get(key)
+    try:
+        shutil.copy2(source,temporary)
+        if digest(source)!=digest(temporary):raise RuntimeError('Staged file hash mismatch: '+str(target))
+        expected=digest(temporary)
+        if (digest(target) if target.exists() else None)!=original:
+            raise RuntimeError('Target changed during staging; user file preserved: '+str(target))
+        if target.exists():
+            descriptor,filename=tempfile.mkstemp(prefix='.l4d2mc-rollback-',dir=target.parent)
+            os.close(descriptor);backup=Path(filename);shutil.copy2(target,backup)
+        if (digest(target) if target.exists() else None)!=original:
+            raise RuntimeError('Target changed during backup; user file preserved: '+str(target))
+        atomic_json(pending_path(),{'target':key,'before':original,'after':expected,
+            'owned':had_record,'record':old_record,'backup':str(backup) if backup else None})
+        os.replace(temporary,target)
+        manifest[key]=expected
+        try:
+            atomic_receipt(manifest)
+        except OSError as error:
+            if had_record:manifest[key]=old_record
+            else:manifest.pop(key,None)
+            try:
+                if digest(target)!=expected:raise RuntimeError('Target changed during receipt failure')
+                if backup is not None:os.replace(backup,target)
+                else:target.unlink()
+            except (OSError,RuntimeError) as rollback_error:
+                keep_backup=True
+                raise RuntimeError('Receipt update failed; rollback requires recovery from '+str(backup)) from rollback_error
+            pending_path().unlink(missing_ok=True)
+            raise error
+        pending_path().unlink(missing_ok=True)
+    finally:
+        temporary.unlink(missing_ok=True)
+        if backup is not None and not keep_backup:backup.unlink(missing_ok=True)
 
 
 def host(manifest):
@@ -141,6 +225,7 @@ def guest(manifest):
 
 
 def uninstall(manifest):
+    recover_pending(manifest)
     changed = []
     for filename, expected in list(manifest.items()):
         path = Path(filename)
@@ -150,7 +235,7 @@ def uninstall(manifest):
         if path.exists():
             path.unlink()
         del manifest[filename]
-    RECEIPT.write_text(json.dumps(manifest, indent=2), encoding='utf-8')
+    atomic_receipt(manifest)
     print('Removed own unchanged files. Worlds and launcher data preserved.')
     if changed:
         print('Preserved externally changed files:', changed)

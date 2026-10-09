@@ -16,3 +16,8 @@ Removal: close games/bridge, run `python passthrough/install.py uninstall` from
 same checkout. Only unchanged owned files are removed; modified/unowned files
 and guest worlds remain. Preserve `backups/` receipt and launch addon/control
 recovery files if console was killed. Never delete an unrelated d3d9.dll.
+
+Interrupted updates: preserve `backups/passthrough-install.json` and its `.pending`
+journal. The next update reconciles completed replacements by old/new checksums.
+If it reports an external change, leave those files intact and review that change;
+the updater refuses to overwrite it. Do not run multiple installers concurrently.

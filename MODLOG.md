@@ -429,3 +429,17 @@ Extracted freshZIP compiled owncube via officialstudiomdl into workspace staging
 guest/native/HUD and all tests:75Python,13JVM,7Source,Win32cursor,PSparse passed.
 No games opened/controlled or saves changed; fullcleaninstall/runtime stillpending.
 Nine owned components then updated and SHAverified, no locked files this attempt.
+
+2026-10-09 second explicit agent audit:
+Logic rebases pill buffer at its actual decayed amount when healing; golden apple
+does not revive expired buffer and respects native maxHP. ViewSizePolicy acknowledges
+actual resize, recovers later external changes/failed pending request after2s.
+Transport evicts far collisioncache entries instead rejectingnewregion; guest
+mob/projectile/physics snapshots expire after.75s tickstall; ReplyTracker separate
+serverOwner cancels stoppedserverpending while retainingdelivered receipts.
+Installer regressions reproduced partialearlyupdate on missing/conflictinglatefile
+and corruptedtarget on interruptedcopy. Now fullpreflight, stagedhash/atomicreplace,
+receipt atomicJSON, ordinaryIOrollback, checksum/existence recheck foruseredits,
+durablependingjournal before replace and startuprecovery. Recovery preservesunexpected
+externaltarget/receiptchanges. Testsisolatedtemporary receipts; no saves changed.
+Aggregatebuild84Python,13JVM,7Source,Win32cursor passed; no games launched.

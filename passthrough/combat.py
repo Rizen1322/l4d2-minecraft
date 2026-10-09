@@ -19,6 +19,7 @@ class GameplayMailbox:
         self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={};self.protection=None;self.protection_at=0;self.effects=None;self.effects_at=0
         self.fires=[];self.fires_at=0
         self.totem_held=None;self.totem_at=0
+        self.mobs_at=self.projectiles_at=self.physics_at=-math.inf
 
     def apply(self,message):
         kind=message.get('t')
@@ -121,8 +122,8 @@ class GameplayMailbox:
                         damage=float(row[5])*15
                     rows.append((row[0],name,*position,damage))
                 else:rows.append((row[0],name,*position))
-            if kind=='mobs':self.mobs=rows
-            else:self.projectiles=rows
+            if kind=='mobs':self.mobs=rows;self.mobs_at=time.monotonic()
+            else:self.projectiles=rows;self.projectiles_at=time.monotonic()
         elif kind=='phys':
             rows=[]
             if len(message['p'])>64:raise ValueError('too many physics entities')
@@ -132,6 +133,7 @@ class GameplayMailbox:
                 if not math.isfinite(w+h) or not 0<w<=16 or not 0<h<=16 or row[6] not in (0,1):raise ValueError('invalid dimensions')
                 rows.append((row[0],*p,w*32,h*32,row[6]))
             self.physics=rows
+            self.physics_at=time.monotonic()
         if event:
             self.serial+=1;self.events.append((self.serial,*event))
 
@@ -144,7 +146,8 @@ class GameplayMailbox:
         self.map=map_name
         records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)} {self.epoch}']
         if active:
-            records+=[' '.join(map(str,('golem',*row))) for row in self.mobs if row[1] in ('iron_golem','snow_golem')][:8]
+            if time.monotonic()-self.mobs_at<0.75:
+                records+=[' '.join(map(str,('golem',*row))) for row in self.mobs if row[1] in ('iron_golem','snow_golem')][:8]
             records+=[' '.join(map(str,('nav',*row))) for row,at in self.navigation.values() if time.monotonic()-at<1.5]
             if time.monotonic()-self.signals_at<0.75:
                 records+=[' '.join(map(str,('signal',*e))) for e in self.signals]
@@ -159,8 +162,8 @@ class GameplayMailbox:
             if self.equipment is not None and time.monotonic()-self.equipment_at<0.75:
                 records.append(' '.join(map(str,('equipment',*self.equipment))))
             records+=[' '.join(map(str,('event',*e))) for e in self.events]
-            records+=[' '.join(map(str,('projectile',*e))) for e in self.projectiles]
-            records+=[' '.join(map(str,('physics',*e))) for e in self.physics]
+            if time.monotonic()-self.projectiles_at<0.75:records+=[' '.join(map(str,('projectile',*e))) for e in self.projectiles]
+            if time.monotonic()-self.physics_at<0.75:records+=[' '.join(map(str,('physics',*e))) for e in self.physics]
         else:
             # A corpse/spectator has no controls, but a previously requested
             # durable totem result and its reply acknowledgements must arrive.

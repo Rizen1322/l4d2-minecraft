@@ -9,6 +9,8 @@
 - Extracted source ZIP built from scratch with supplied external tool paths:
   own collision model/materials, private HUD, guest, native and all checks passed.
   75 Python tests,13 JVM programs,7 Source suites and Win32 cursor regression.
+- Latest additional audit passed84 Python tests with the same13 JVM programs,
+  7 Source suites and Win32 cursor regression; runtime checks still pending.
 - Clean-machine install and full in-game regression remain pending. Publish as
   experimental source alpha, not a complete binary release or finished conversion.
 

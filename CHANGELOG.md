@@ -2,6 +2,13 @@
 
 ## Unreleased — alpha source preparation (2026-10-09)
 
+- Additional agent audit: correct current temporary-HP decay during healing and
+  golden apples; recover stalled/external window resizes without immediate repeats.
+- Preserve new collision regions when cache is full; expire stalled guest mob,
+  projectile and physics snapshots; retry replies after integrated-server replacement.
+- Preflight the whole update before writes; stage/hash/replace each file, recheck
+  concurrent user edits, persist a recovery journal and roll back receipt IO failure.
+
 - Retry congestion-blocked totem confirmations and completed mob routes without
   duplicating queued responses; discard old-round navigation jobs.
 - Restore held input after reconnect; immediately release GUI/native ownership

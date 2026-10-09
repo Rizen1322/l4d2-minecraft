@@ -231,7 +231,7 @@ class CollisionSnapshot:
     """Bounded, data-only reverse channel. Never emits executable Squirrel."""
     def __init__(self, path):
         self.path, self.cells, self.sequence, self.map = path, set(), 0, None
-        self.scene = None;self.epoch=0
+        self.scene = None;self.epoch=0;self.centre=(0,0,0)
 
     def apply(self, message):
         if message.get('t') != 'blocks' or (self.scene is not None and message.get('scene') != self.scene):
@@ -255,7 +255,15 @@ class CollisionSnapshot:
                 else:
                     cells.discard(cell)
         if len(cells) > 10000:
-            raise ValueError('collision cache limit exceeded')
+            # A complete new region must not be rejected merely because old
+            # far regions filled the cache. Recover evicted regions on resync.
+            if bounds is not None:
+                current={c for c in cells if all(bounds[i]<=c[i]<=bounds[i+3] for i in range(3))}
+                if len(current)>10000:raise ValueError('collision region limit exceeded')
+                centre=tuple((bounds[i]+bounds[i+3])/2 for i in range(3))
+            else:current=set();centre=self.centre
+            distance=lambda c:sum((c[i]+0.5-centre[i])**2 for i in range(3))
+            cells=current | set(sorted(cells-current,key=lambda c:(distance(c),c))[:10000-len(current)])
         self.cells = cells
 
     def publish(self, map_name, centre, active=True):
@@ -264,6 +272,7 @@ class CollisionSnapshot:
         if self.map is not None and self.map != map_name:
             self.cells.clear()
         self.map = map_name
+        self.centre=tuple(centre)
         # Bound host props independently of the cache; Source also checks its free edicts.
         rows = sorted(self.cells, key=lambda c: sum((c[i]+0.5-centre[i])**2 for i in range(3)))[:512] if active else []
         self.sequence += 1

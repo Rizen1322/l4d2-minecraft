@@ -278,24 +278,13 @@ L4D2MCBridge.Event <- function(fields,player) {
     } else if(kind=="meal" && fields.len()==5) {
         local amount=Number(fields[3],100),gold=Integer(fields[4]);if(amount<=0 || gold>1)throw "invalid meal";
         survival.meal+=amount;if(survival.meal>100)survival.meal=100;
-        if(gold==1 && !player.IsIncapacitated() && NetProps.HasProp(player,"m_healthBuffer")) {
-            local buffer=NetProps.GetPropFloat(player,"m_healthBuffer")+20,room=100-player.GetHealth();
-            NetProps.SetPropFloat(player,"m_healthBuffer",buffer<room?buffer:room);
-            if(NetProps.HasProp(player,"m_healthBufferTime"))NetProps.SetPropFloat(player,"m_healthBufferTime",Time());
-        }
+        if(gold==1)AddTemporaryHealth(player,20);
     } else if(kind=="heal" && fields.len()==4) {
         local amount=Number(fields[3],100);
         if(amount<=0)throw "invalid food heal";
         if(player.GetHealth()>0 && !player.IsIncapacitated() && !player.IsHangingFromLedge()) {
-            local maximum=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;
-            if(maximum<=0)maximum=100;
-            local healed=player.GetHealth()+amount.tointeger();if(healed>maximum)healed=maximum;
-            player.SetHealth(healed);
-            if(NetProps.HasProp(player,"m_healthBuffer")) {
-                local buffer=NetProps.GetPropFloat(player,"m_healthBuffer"),room=(maximum-healed).tofloat();
-                NetProps.SetPropFloat(player,"m_healthBuffer",buffer<room?buffer:room);
-            }
-            printl("[L4D2MC FOOD] health="+healed);
+            Heal(player,amount);
+            printl("[L4D2MC FOOD] health="+player.GetHealth());
         }
     } else if(kind=="ignite" && fields.len()==6) {
         IgniteGround(fields,player);

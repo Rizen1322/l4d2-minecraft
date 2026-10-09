@@ -153,15 +153,39 @@ L4D2MCBridge.Equipment <- function(fields,player) {
     survival.player=player;survival.armor=armor;survival.toughness=toughness;
     survival.blocking=blocking==1;survival.equipmentAt=Time();
 };
+L4D2MCBridge.PlayerMaxHealth <- function(player) {
+    local maximum=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;
+    return maximum>0?maximum:100;
+};
+L4D2MCBridge.TemporaryHealth <- function(player) {
+    if(!NetProps.HasProp(player,"m_healthBuffer"))return 0.0;
+    local value=NetProps.GetPropFloat(player,"m_healthBuffer");
+    if(NetProps.HasProp(player,"m_healthBufferTime")) {
+        local elapsed=Time()-NetProps.GetPropFloat(player,"m_healthBufferTime");
+        local decay=Convars.GetFloat("pain_pills_decay_rate");
+        if(elapsed>0 && decay!=null && decay>0)value-=elapsed*decay;
+    }
+    return value>0?value:0.0;
+};
+L4D2MCBridge.SetTemporaryHealth <- function(player,value,maximum) {
+    if(NetProps.HasProp(player,"m_healthBuffer")) {
+        local room=maximum-player.GetHealth();if(room<0)room=0;
+        if(value<0)value=0;
+        NetProps.SetPropFloat(player,"m_healthBuffer",value<room?value:room);
+        if(NetProps.HasProp(player,"m_healthBufferTime"))NetProps.SetPropFloat(player,"m_healthBufferTime",Time());
+    }
+};
+L4D2MCBridge.AddTemporaryHealth <- function(player,amount) {
+    if(player.GetHealth()<=0 || player.IsIncapacitated() || player.IsHangingFromLedge())return;
+    SetTemporaryHealth(player,TemporaryHealth(player)+amount,PlayerMaxHealth(player));
+};
 L4D2MCBridge.Heal <- function(player,amount) {
     if(player.GetHealth()<=0 || player.IsIncapacitated() || player.IsHangingFromLedge())return;
-    local maximum=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;
-    if(maximum<=0)maximum=100;
+    local maximum=PlayerMaxHealth(player),temporary=TemporaryHealth(player);
     local h=player.GetHealth()+amount.tointeger();if(h>maximum)h=maximum;player.SetHealth(h);
-    if(NetProps.HasProp(player,"m_healthBuffer")) {
-        local b=NetProps.GetPropFloat(player,"m_healthBuffer"),room=(maximum-h).tofloat();
-        NetProps.SetPropFloat(player,"m_healthBuffer",b<room?b:room);
-    }
+    // Rebase the surviving temporary amount before clamping to the new room.
+    // Clamping historical raw HP and retaining its timestamp subtracts decay twice.
+    SetTemporaryHealth(player,temporary,maximum);
 };
 L4D2MCBridge.ProtectionEquipment <- function(f) {
     if(f.len()!=8)return;

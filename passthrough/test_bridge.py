@@ -7,6 +7,19 @@ from bridge import CollisionSnapshot, camera, position, surface, render_camera, 
 
 
 class SessionTests(unittest.TestCase):
+    def test_full_collision_cache_keeps_complete_new_region_and_evicts_old_far_cells(self):
+        with tempfile.TemporaryDirectory() as d:
+            cache=CollisionSnapshot(Path(d)/'collision')
+            cache.cells={(x,y,-1) for x in range(-1000,-900) for y in range(100)}
+            cache.apply({'t':'blocks','bounds':[10,0,10,10,1,10],'set':[10,0,10,10,1,10]})
+            self.assertEqual(len(cache.cells),10000)
+            self.assertTrue({(10,0,10),(10,1,10)}<=cache.cells)
+            cache.apply({'t':'blocks','bounds':[10,0,10,10,1,10],'set':[]})
+            self.assertTrue({(10,0,10),(10,1,10)}.isdisjoint(cache.cells))
+            cache.publish('c1m1_hotel',[100,0,100],active=False)
+            cache.apply({'t':'blocks','set':[100,0,100]})
+            self.assertIn((100,0,100),cache.cells)
+            self.assertLessEqual(len(cache.cells),10000)
     def test_disconnect_releases_native_input_and_reconnect_reasserts_held_button(self):
         from bridge import reset_input_session
         from types import SimpleNamespace

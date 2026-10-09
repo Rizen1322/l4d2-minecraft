@@ -115,10 +115,14 @@ public final class HostLink extends WebSocketServer {
         int rid=m.has("rid")?m.get("rid").getAsInt():0;
         if(rid<0)return;
         var server=WorldBridge.server();
-        synchronized(controllerLock){if(snapshotServer.get()!=server){latestSnapshots.clear();snapshotServer=new java.lang.ref.WeakReference<>(server);}}
+        final long replyOwner;
+        synchronized(controllerLock){
+            if(snapshotServer.get()!=server){latestSnapshots.clear();snapshotServer=new java.lang.ref.WeakReference<>(server);}
+            replyOwner=replies.serverOwner(server);
+        }
         if(server==null || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
         if(rid>0){
-            var status=replies.begin(scene,generation,rid);
+            var status=replies.begin(scene,replyOwner,rid);
             if(status==dev.rehan.passthrough.ReplyTracker.Status.DONE){ackReply(rid);return;}
             if(status==dev.rehan.passthrough.ReplyTracker.Status.PENDING)return;
         }
@@ -128,7 +132,7 @@ public final class HostLink extends WebSocketServer {
             success=true;
             if(rid>0)ackReply(rid);
         }catch(RuntimeException error){Passthrough.LOG.warn("Source reply not applied; retained for retry",error);}
-        finally{if(rid>0)replies.finish(scene,generation,rid,success);}};
+        finally{if(rid>0)replies.finish(scene,replyOwner,rid,success);}};
         if(rid==0 && LATEST_SNAPSHOTS.contains(m.get("t").getAsString()))
             latestSnapshots.submit(new SnapshotKey(scene,generation,m.get("t").getAsString()),server::execute,apply);
         else server.execute(apply);

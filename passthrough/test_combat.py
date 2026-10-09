@@ -5,6 +5,25 @@ from combat import GameplayMailbox,source_position
 
 
 class CombatTests(unittest.TestCase):
+    def test_entity_snapshots_expire_when_guest_server_stalls_and_resume_when_fresh(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'mailbox')
+            with patch('combat.time.monotonic',return_value=10):
+                box.apply({'t':'mobs','m':[[1,'iron_golem',0,0,0]]})
+                box.apply({'t':'proj','p':[[2,'arrow',0,0,0]]})
+                box.apply({'t':'phys','p':[[1,0,0,0,1.4,2.7,1]]})
+                box.publish('c1m1_hotel');self.assertIn('golem',box.path.read_text())
+            with patch('combat.time.monotonic',return_value=11):
+                box.publish('c1m1_hotel');text=box.path.read_text()
+                for prefix in ('golem ','projectile ','physics '):self.assertNotIn(prefix,text)
+                box.apply({'t':'mobs','m':[[1,'iron_golem',0,0,0]]})
+                box.publish('c1m1_hotel');self.assertIn('golem',box.path.read_text())
+                self.assertNotIn('projectile ',box.path.read_text())
+            with patch('combat.time.monotonic',return_value=11.6):
+                with self.assertRaises(ValueError):box.apply({'t':'mobs','m':[[1,'iron_golem',float('nan'),0,0]]})
+            with patch('combat.time.monotonic',return_value=11.8):
+                box.publish('c1m1_hotel');self.assertNotIn('golem ',box.path.read_text())
     def test_mob_kind_survives_tunnel_for_golem_damage_and_rejects_tokens(self):
         with tempfile.TemporaryDirectory() as d:
             box=GameplayMailbox(Path(d)/'mailbox')
