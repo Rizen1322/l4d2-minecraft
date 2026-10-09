@@ -72,6 +72,7 @@ namespace
     Layer g_worldBack, g_depthBack, g_overlayBack;
 	uint32_t g_width = 0, g_height = 0;
 	bool g_hasFrame = false;
+	uint64_t g_hostScene = 0, g_mcScene = 0;
 	float g_mcNear = 0.05f, g_mcFar = 2048.0f;
 	int32_t g_mcFlags = 7;
 
@@ -199,6 +200,16 @@ namespace
 		const uint32_t w = read<uint32_t>(desc + 24), h = read<uint32_t>(desc + 28);
 		if (w == 0 || h == 0 || w > 3840 || h > 2160 || uint64_t(w) * h * 12 > uint64_t(g_stride))
 			return;
+		const uint64_t scene = read<uint64_t>(desc + 104);
+		const int64_t captured = read<int64_t>(desc + 88), completed = read<int64_t>(desc + 96);
+		if (!scene || scene != g_hostScene || completed < captured || completed - captured > 500000000LL)
+			return;
+		// Bad metadata must never enter projection uniforms, even with valid pixels.
+		const float nearPlane = read<float>(desc + 32), farPlane = read<float>(desc + 36), fov = read<float>(desc + 40);
+		if (!std::isfinite(nearPlane) || !std::isfinite(farPlane) || !std::isfinite(fov) ||
+			nearPlane <= 0 || farPlane <= nearPlane || fov <= 1 || fov >= 179) return;
+		for (int offset : {48, 56, 64}) if (!std::isfinite(read<double>(desc + offset))) return;
+		for (int offset : {72, 76, 80}) if (!std::isfinite(read<float>(desc + offset))) return;
 		device *dev = runtime->get_device();
 		if (w != g_width || h != g_height)
 		{
@@ -266,6 +277,7 @@ namespace
 		g_mcPose.z = read<double>(desc + 64);
 		g_mcPose.valid = true;
 		g_hasFrame = true;
+		g_mcScene = scene;
 	}
 
 	/// Camera-to-world rotation, as Minecraft builds it: rotationYXZ(pi - yaw, -pitch, roll) (camera looks down -z).
@@ -395,7 +407,7 @@ namespace
 		bool on = g_active && g_sceneVisible && !source_camera::menu_visible() && source_camera::gameplay_visible() && open_mapping();
 		if (on)
 			upload(runtime);
-		on = on && g_hasFrame && GetTickCount64() - g_lastNewFrame < 500;
+		on = on && g_hasFrame && g_hostScene != 0 && g_mcScene == g_hostScene && GetTickCount64() - g_lastNewFrame < 500;
 		// The technique stays enabled (preset); McActive gates it, so GTA passes through untouched until a
 		// Minecraft frame is here. (Toggling techniques from inside this callback crashes ReShade.)
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McActive"); v.handle != 0)
@@ -500,15 +512,18 @@ namespace
 		if ((seq & 1) || read<uint32_t>(view) != 0x50434D4C) return; // Hold the last complete pose across an in-progress write.
 		const uint64_t timestamp = read<uint64_t>(view + 8);
 		const auto inputStamp=read<uint64_t>(view+72),now=GetTickCount64();
-        lastInputAccepted=inputStamp;
-        g_guestInputAlive=inputStamp>0 && now>=inputStamp && now-inputStamp<1000;
-        g_guestUiOpen = read<uint32_t>(view + 64) != 0;
-        g_movementHeld=read<uint32_t>(view+80)&127;
-        g_sceneVisible=read<uint32_t>(view+84)!=0;
-        g_debugMode = read<uint32_t>(view + 68);
+		const bool uiOpen = read<uint32_t>(view + 64) != 0;
+		const uint32_t held = read<uint32_t>(view + 80) & 127, debug = read<uint32_t>(view + 68);
+		const bool sceneVisible = read<uint32_t>(view + 84) != 0;
+		const uint64_t scene = read<uint64_t>(view + 88);
 		const double x = read<double>(view+16), y = read<double>(view+24), z = read<double>(view+32);
 		const float yaw = read<float>(view+40), pitch = read<float>(view+44), roll = read<float>(view+48), fov = read<float>(view+52);
+		MemoryBarrier();
 		if (read<uint32_t>(view+4) != seq) return;
+		lastInputAccepted=inputStamp;
+		g_guestInputAlive=inputStamp>0 && now>=inputStamp && now-inputStamp<1000;
+		g_guestUiOpen=uiOpen;g_movementHeld=held;g_sceneVisible=sceneVisible;g_debugMode=debug;
+		if (scene != g_hostScene) { g_hasFrame=false;g_hostScene=scene; }
 		const bool fresh = GetTickCount64() >= timestamp && GetTickCount64() - timestamp < 500;
 		compositor::set_active(fresh);
         if(fresh) lastAccepted=timestamp;

@@ -47,7 +47,13 @@ public final class HostLink extends WebSocketServer {
 		int port = Integer.getInteger("passthrough.port", 25601);
 		instance = new HostLink(port);
 		instance.start();
-		Passthrough.events = message -> instance.broadcast(message);
+		Passthrough.events = message -> {
+            JsonObject event=JsonParser.parseString(message).getAsJsonObject();
+            String type=event.get("t").getAsString();
+            if(!java.util.Set.of("ui","mapready","pickupack","rewardack").contains(type) && !event.has("scene"))
+                event.addProperty("scene",dev.rehan.passthrough.MapBuilds.scene());
+            instance.broadcast(event.toString());
+        };
 	}
 
 	@Override
@@ -99,7 +105,7 @@ public final class HostLink extends WebSocketServer {
                     Minecraft minecraft=Minecraft.getInstance();
                     minecraft.execute(()->{if(controller==conn && controllerGeneration==generation)ClientInput.releaseRelay(minecraft);});
                 }
-				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString(),m.has("epoch")?m.get("epoch").getAsLong():0);
+				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString(),m.has("epoch")?m.get("epoch").getAsLong():0,m.has("scene")?m.get("scene").getAsLong():0);
                 case "cam" -> HostState.update(m);
 				case "surface" -> HostState.surface(m);
                 case "physground" -> HostTerrain.update(m.getAsJsonArray("p"));

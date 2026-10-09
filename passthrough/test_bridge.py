@@ -241,3 +241,29 @@ class PickupOutboxTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'pickups';p.write_text('pickup_1_2 bow\npickup_1_3 speed_potion\npickup_1_4 weapon_gascan\npickup_bad;quit tnt\n\x00')
             self.assertEqual([v['item'] for v in PickupOutbox(p).read()],['bow','speed_potion'])
+
+class SceneTests(unittest.TestCase):
+    def test_map_and_same_map_restart_have_distinct_stable_tokens(self):
+        from bridge import scene_token
+        a=scene_token('c1m1_hotel',11)
+        self.assertEqual(a,scene_token('c1m1_hotel',11))
+        self.assertNotEqual(a,scene_token('c1m1_hotel',12))
+        self.assertNotEqual(a,scene_token('c1m2_streets',11))
+        self.assertTrue(0<a<2**63)
+    def test_stale_block_snapshot_cannot_restore_old_collisions(self):
+        with tempfile.TemporaryDirectory() as d:
+            c=CollisionSnapshot(Path(d)/'collision');c.scene=22
+            c.apply({'t':'blocks','scene':22,'set':[1,2,3]})
+            c.apply({'t':'blocks','scene':11,'bounds':[-10,-10,-10,10,10,10],'set':[4,5,6]})
+            self.assertEqual(c.cells,{(1,2,3)})
+            c.apply({'t':'blocks','set':[9,9,9]})
+            self.assertEqual(c.cells,{(1,2,3)})
+
+class ScopedGameplayTests(unittest.TestCase):
+    def test_old_combat_rejected_but_durable_receipts_survive(self):
+        from bridge import accepts_scene
+        for kind in ['melee','effects','mobs','phys','blocks','syncdone']:
+            self.assertFalse(accepts_scene({'t':kind,'scene':1},2))
+            self.assertTrue(accepts_scene({'t':kind,'scene':2},2))
+        self.assertTrue(accepts_scene({'t':'pickupack','key':'pickup_1_2'},2))
+        self.assertTrue(accepts_scene({'t':'rewardack','key':'c1m1_hotel_1'},2))

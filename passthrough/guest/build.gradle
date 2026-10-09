@@ -83,3 +83,10 @@ tasks.register('verifyPickupPolicy', JavaExec) {
     mainClass = 'dev.rehan.passthrough.PickupPolicyTest'
 }
 check.dependsOn verifyPickupPolicy
+
+tasks.register('verifyFramePublishPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.FramePublishPolicyTest'
+}
+check.dependsOn verifyFramePublishPolicy

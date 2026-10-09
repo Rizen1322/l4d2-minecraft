@@ -20,7 +20,7 @@ public final class HostState {
 	public record Pose(
 		long hostFrame, double x, double y, double z, float yaw, float pitch, float roll, float fov,
 		boolean firstPerson, double px, double py, double pz, float bodyYaw, long receivedNanos,
-		boolean drive, float lookYaw, float lookPitch, boolean gun
+		boolean drive, float lookYaw, float lookPitch, boolean gun, long scene
 	) {
 	}
 
@@ -80,14 +80,15 @@ public final class HostState {
 			m.has("drive") && m.get("drive").getAsBoolean(),
 			m.has("look") ? m.getAsJsonArray("look").get(0).getAsFloat() : yaw,
 			m.has("look") ? m.getAsJsonArray("look").get(1).getAsFloat() : r.get(1).getAsFloat(),
-			m.has("gun") && m.get("gun").getAsBoolean()
+			m.has("gun") && m.get("gun").getAsBoolean(),
+            m.has("scene")?m.get("scene").getAsLong():0
 		);
 	}
 
 	/** The latest pose if the host is still sending, else null. */
 	static Pose live() {
 		Pose p = latest;
-		return dev.rehan.passthrough.MapBuilds.ready && visible && p != null && System.nanoTime() - p.receivedNanos() < TIMEOUT_NANOS ? p : null;
+		return dev.rehan.passthrough.MapBuilds.ready && visible && p != null && p.scene()==dev.rehan.passthrough.MapBuilds.scene() && System.nanoTime() - p.receivedNanos() < TIMEOUT_NANOS ? p : null;
 	}
 
 	/** The pose for the frame being rendered, or null when no host is attached. */

@@ -28,6 +28,11 @@ public final class MapBuilds {
     private static boolean recovering,commitPending;
     private static Path directory;
     private static volatile long requestedEpoch;
+    private record Selection(String map,long epoch,long scene) {}
+    private static volatile Selection selection=new Selection("",0,0);
+    private static long requestedScene;
+    private static volatile long scene;
+    public static long scene(){return scene;}
     private static long epoch=-1;
     private static String map="",pending="";
     private static boolean applying;
@@ -36,7 +41,7 @@ public final class MapBuilds {
     public static void attach(MinecraftServer s){
         Path root=s.getWorldPath(LevelResource.ROOT).normalize();
         server=root.getFileName().toString().equals("l4d2mc-guest")?s:null;
-        cells.clear();touched.clear();edits.clear();epoch=-1;map="";pending="";recovering=false;commitPending=false;retryTicks=0;ready=server==null;
+        cells.clear();touched.clear();edits.clear();scene=0;epoch=-1;map="";pending="";recovering=false;commitPending=false;retryTicks=0;ready=server==null;
         if(server==null)return;
         directory=root.resolve("l4d2mc-maps");
         try {
@@ -107,13 +112,13 @@ public final class MapBuilds {
         }catch(Exception e){Passthrough.LOG.error("Cannot open map archive; switching disabled",e);server=null;ready=false;}
     }
     private static boolean valid(String name){return name.matches("[A-Za-z0-9_]{1,96}");}
-    public static void select(String name,long session){
-        if(valid(name) && session>=0){requestedEpoch=session;requested=name;} // Retain requests received before SERVER_STARTED.
+    public static void select(String name,long session,long token){
+        if(valid(name) && session>=0 && token>0){selection=new Selection(name,session,token);} // Retain requests received before SERVER_STARTED.
     }
     private static void begin(String name){
         if(!pending.isEmpty() || commitPending)return;
         if(map.equals(name) && epoch==requestedEpoch){ready=true;notice();return;}
-        ready=false;SurvivalFeatures.resetEnvironment();HostNavigation.clear();RedstoneLinks.clear();WorldBridge.resetBarricades();
+        ready=false;WorldBridge.clearTransient();SurvivalFeatures.resetEnvironment();HostNavigation.clear();RedstoneLinks.clear();WorldBridge.resetBarricades();
         try {
             Map<BlockPos,Cell> next=Map.of(); // New host round/map begins with an empty guest scene; preserve the previous archive first.
             if(map.isEmpty() && !cells.isEmpty())map="legacy_unassigned";
@@ -126,7 +131,7 @@ public final class MapBuilds {
                 Files.move(temp,directory.resolve("transition.txt"),StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
             }
             MobWar.hostGone();clearEntities();
-            epoch=requestedEpoch;pending=name;
+            epoch=requestedEpoch;scene=requestedScene;pending=name;
             for(BlockPos p:cells.keySet())edits.add(new Edit(p,new Cell(Blocks.AIR.defaultBlockState(),null)));
             for(var entry:next.entrySet())edits.add(new Edit(entry.getKey(),entry.getValue()));
             // Empty initial scenes need no block-clear transaction.
@@ -245,6 +250,7 @@ public final class MapBuilds {
         Files.deleteIfExists(directory.resolve("checkpoint.dat"));touched.clear();
     }
     public static void tick(MinecraftServer s){
+        Selection target=selection;requested=target.map();requestedEpoch=target.epoch();requestedScene=target.scene();
         if(s!=server)return;
         if(retryTicks>0)retryTicks--;
         if(pending.isEmpty() && !edits.isEmpty() && !map.isEmpty()){pending=map;ready=false;}
@@ -278,5 +284,5 @@ public final class MapBuilds {
             recovering=false;commitPending=false;ready=map.equals(requested) && epoch==requestedEpoch;notice();
         }catch(Exception e){ready=false;Passthrough.LOG.error("Cannot commit map archive",e);}
     }
-    public static void detach(){HostNavigation.clear();try{save();}catch(Exception e){Passthrough.LOG.error("Cannot save map builds",e);}server=null;cells.clear();touched.clear();edits.clear();earlyChunks.clear();requested="";recovering=false;commitPending=false;ready=true;}
+    public static void detach(){HostNavigation.clear();try{save();}catch(Exception e){Passthrough.LOG.error("Cannot save map builds",e);}server=null;cells.clear();touched.clear();edits.clear();earlyChunks.clear();requested="";selection=new Selection("",0,0);scene=0;recovering=false;commitPending=false;ready=true;}
 }

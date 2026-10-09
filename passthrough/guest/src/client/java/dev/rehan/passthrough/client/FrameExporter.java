@@ -25,6 +25,7 @@ import org.joml.Vector4f;
  *     +44 int flags: 1 = depth in [0, 1] (zZeroToOne), 2 = rows bottom-up, 4 = reversed Z (1 = near, 0 = far/empty)
  *     +48 double camera x, +56 y, +64 z   +72 float yaw   +76 pitch   +80 roll   +84 int first person
  *     +88 long capture time (System.nanoTime)   +96 long publish time
+ *     +104 long scene token (host map and round identity)
  * slot i data at 4096 + i * stride, each layer width * height * 4 bytes:
  *   world colour RGBA8 (premultiplied alpha), world depth float32, overlay RGBA8 (hand + HUD, premultiplied alpha)
  * </pre>
@@ -65,6 +66,7 @@ public final class FrameExporter {
 	private static long frameCounter;
 	private static long publishCounter;
 	private static Capture current;
+	private static final dev.rehan.passthrough.FramePublishPolicy publishPolicy = new dev.rehan.passthrough.FramePublishPolicy();
 
 	private FrameExporter() {
 	}
@@ -153,7 +155,7 @@ public final class FrameExporter {
 
 		int w = target.width;
 		int h = target.height;
-		if ((long)w * h * 4 > LAYER_MAX) {
+		if (w <= 0 || h <= 0 || w > MAX_W || h > MAX_H || (long)w * h * 4 > LAYER_MAX) {
 			if (!warnedSize) {
 				warnedSize = true;
 				Passthrough.LOG.warn("frame export: {}x{} is bigger than {}x{}, not exporting", w, h, MAX_W, MAX_H);
@@ -214,6 +216,9 @@ public final class FrameExporter {
 
 	private static void publish(final Capture c) {
 		try {
+			HostState.Pose live = HostState.live();
+			long publishedNanos = System.nanoTime();
+			if (!publishPolicy.accept(c.frame, c.pose.scene(), live == null ? 0 : live.scene(), c.captureNanos, publishedNanos)) return;
 			MemorySegment m = shm.segment;
 			int slot = slotNext;
 			slotNext = (slotNext + 1) % SLOTS;
@@ -247,7 +252,8 @@ public final class FrameExporter {
 			m.set(FLOAT, desc + 80, p.roll());
 			m.set(INT, desc + 84, p.firstPerson() ? 1 : 0);
 			m.set(LONG, desc + 88, c.captureNanos);
-			m.set(LONG, desc + 96, System.nanoTime());
+			m.set(LONG, desc + 96, publishedNanos);
+			m.set(LONG, desc + 104, p.scene());
 			VarHandle.fullFence();
 			m.set(LONG, desc, seq + 2L);
 			m.set(INT, 40, slot);

@@ -33,16 +33,18 @@ public final class WorldBridge {
 	/** While placing or removing the host's own ground: those changes aren't news to the host (server thread only). */
 	private static boolean placingGround;
 
-	private WorldBridge() {
+	public static void clearTransient(){changes.clear();barricadeDamage.clear();}
+
+    private WorldBridge() {
 	}
 
 	static void attach(final MinecraftServer s) {
-		server = s;
+		server = s;changes.clear();
 	}
 
 	static void detach() {
 		saveMigration();
-        resetBarricades();
+        clearTransient();
 		server = null;
 		barriers.clear();
 	}
@@ -253,7 +255,7 @@ public final class WorldBridge {
 
 	/** Server thread, from Level.setBlock: remember the change; flushed once per tick. */
 	public static void onBlockChanged(final ServerLevel level, final BlockPos pos, final BlockState state) {
-		if (!Passthrough.active || level != level.getServer().overworld()) {
+		if (!Passthrough.active || !MapBuilds.ready || level != level.getServer().overworld()) {
 			return;
 		}
 
@@ -272,7 +274,8 @@ public final class WorldBridge {
 
 	/** End of each server tick: {"t":"blocks","set":[x,y,z,...],"clear":[x,y,z,...]}. */
 	static void flush(final MinecraftServer s) {
-		if (changes.isEmpty()) {
+		if (!MapBuilds.ready){changes.clear();return;}
+        if (changes.isEmpty()) {
 			return;
 		}
 
@@ -285,7 +288,7 @@ public final class WorldBridge {
 		}
 
 		changes.clear();
-		Passthrough.events.accept("{\"t\":\"blocks\",\"set\":[" + set + "],\"clear\":[" + clear + "]}");
+		Passthrough.events.accept("{\"t\":\"blocks\",\"scene\":"+MapBuilds.scene()+",\"set\":[" + set + "],\"clear\":[" + clear + "]}");
 	}
 
 	/** Every solid block within `radius` of the player, as one "blocks" message (the host's props start from this). */
@@ -299,7 +302,9 @@ public final class WorldBridge {
 			return;
 		}
 
+        long scene=MapBuilds.scene();
 		s.execute(() -> {
+            if(!MapBuilds.ready || scene!=MapBuilds.scene())return;
 			ServerLevel level = s.overworld();
 			ServerPlayer player = s.getPlayerList().getPlayers().isEmpty() ? null : s.getPlayerList().getPlayers().get(0);
 			if (player == null) {
@@ -326,9 +331,9 @@ public final class WorldBridge {
                 }
             }
             flush(s);
-            Passthrough.events.accept("{\"t\":\"blocks\",\"bounds\":["+x0+","+y0+","+z0+","+x1+","+y1+","+z1+"],\"set\":["+cells+"]}");
+            Passthrough.events.accept("{\"t\":\"blocks\",\"scene\":"+scene+",\"bounds\":["+x0+","+y0+","+z0+","+x1+","+y1+","+z1+"],\"set\":["+cells+"]}");
 
-			Passthrough.events.accept("{\"t\":\"syncdone\",\"id\":" + request + ",\"count\":" + found + "}");
+			Passthrough.events.accept("{\"t\":\"syncdone\",\"scene\":"+scene+",\"id\":" + request + ",\"count\":" + found + "}");
 		});
 	}
 

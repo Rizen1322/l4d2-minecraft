@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import ctypes
 import json
+import hashlib
 import math
 import mmap
 from pathlib import Path
@@ -81,6 +82,14 @@ def movement_mask(pressed,bindings):
         if key in pressed:mask|=bits
     return mask
 
+def scene_token(map_name,epoch):
+    """Stable positive int64 identity shared by geometry, capture and host camera."""
+    return int.from_bytes(hashlib.blake2b(f'{map_name}:{epoch}'.encode('ascii'),digest_size=8).digest(),'little') & ((1<<63)-1) or 1
+
+def accepts_scene(event,scene):
+    # Durable receipts and window state survive map transitions; combat/geometry do not.
+    return event.get('t') in ('ui','mapready','pickupack','rewardack','hello') or (scene is not None and event.get('scene')==scene)
+
 class RewardOutbox:
     def __init__(self,path):self.path=path
     def read(self):
@@ -121,7 +130,7 @@ class SourceSnapshot:
             camera(sample,1.0)
             if not isinstance(sample['map'],str) or not re.fullmatch(r'[A-Za-z0-9_]+',sample['map']):raise ValueError('invalid map')
             if time.time()-self.path.stat().st_mtime>1:return None
-            identity=(sample['map'],sample['f'])
+            identity=(sample['map'],sample.get('epoch',0),sample['f'])
             if identity!=self.identity:self.identity=identity;self.changed=now
             self.sample=sample
         except (OSError,ValueError,KeyError,TypeError):pass
@@ -205,9 +214,10 @@ class CollisionSnapshot:
     """Bounded, data-only reverse channel. Never emits executable Squirrel."""
     def __init__(self, path):
         self.path, self.cells, self.sequence, self.map = path, set(), 0, None
+        self.scene = None
 
     def apply(self, message):
-        if message.get('t') != 'blocks':
+        if message.get('t') != 'blocks' or (self.scene is not None and message.get('scene') != self.scene):
             return
         cells = set(self.cells)
         bounds = message.get('bounds')
@@ -398,6 +408,7 @@ class PoseMemory:
                              *pose["p"], *pose["r"], pose["fov"])
         self.memory[:len(packet)] = packet
         struct.pack_into("<I", self.memory, 84, int(pose.get("visible",True)))
+        struct.pack_into("<Q", self.memory, 88, pose.get("scene",0))
         struct.pack_into("<I", self.memory, 4, self.sequence)
 
 
@@ -506,7 +517,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
         try:
             async with websockets.connect("ws://127.0.0.1:25601", max_size=1024*1024) as socket:
                 print("Minecraft guest connected", flush=True)
-                collision.cells.clear()
+                collision.cells.clear();collision.scene=None
                 await socket.send(json.dumps({'t':'attach'}))
                 await socket.send(json.dumps({'t':'clear'}))
                 # Resume the guest if its pause menu was left open; reconnects begin in play mode.
@@ -537,19 +548,22 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                             session=(sample['map'],sample.get('epoch',0))
                             if guest_map != session:
                                 guest_map=session;map_ready=False
-                                collision.cells.clear()
+                                collision.cells.clear();collision.scene=scene_token(*session)
+                                gameplay.effects=None
+                                sync_after=None;next_sync=0.0;synced=False;sync_id=time.monotonic_ns()
                                 gameplay.events.clear();gameplay.mobs.clear();gameplay.physics.clear();gameplay.projectiles.clear()
                                 gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[];gameplay.protection=None
                                 last_frame=None;last_render=None
                                 last_world_request=0.0
                             if time.monotonic()-last_world_request>1.0:
-                                await socket.send(json.dumps({'t':'world','map':guest_map[0],'epoch':guest_map[1]}))
+                                await socket.send(json.dumps({'t':'world','map':guest_map[0],'epoch':guest_map[1],'scene':collision.scene}))
                                 last_world_request=time.monotonic()
                             pose = camera(sample, args.width / args.height)
                             actual=render.read()
                             pose = render_camera(pose, actual, last_render)
                             if 'render_sequence' in pose:
                                 last_render = pose
+                            pose['scene']=collision.scene
                             pose['visible']=bool(sample.get('visible',True)) and map_ready
                             pose['fp'] = host_input.perspective==0 and not sample.get('pinned',False)
                             identity = (sample["map"], sample.get("epoch",0), map_ready, sample["f"], pose.get('render_sequence'))
@@ -612,6 +626,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                         reply = await asyncio.wait_for(socket.recv(), timeout=0.001)
                         try:
                             event = json.loads(reply)
+                            if not accepts_scene(event,collision.scene):event={'t':'stale_scene'}
                             collision.apply(event)
                             gameplay.apply(event)
                             if event.get('t') == 'syncdone' and event.get('id') == sync_id:

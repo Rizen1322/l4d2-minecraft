@@ -384,3 +384,31 @@ VScript syntax, Squirrel-моки floor/nav, shield capacity/cooldown и sword c
 (2 commons, союзник, цель сзади и за стеной), PowerShell syntax. Семь компонентов
 установлены и проверены SHA-256. Игры не запускались и не закрывались; новые
 визуальные/Source API пути пока не подтверждены в настоящей игровой сессии.
+
+
+## Повторная проверка рендера и синхронизации — 09.10.2026
+
+Независимый агент проверил readback/compositor и затем интеграцию исправлений.
+Стабильная математика shader depth/reprojection не менялась. Выявлены и устранены
+причины отката/старой сцены: поздний GPU callback мог публиковать более старый
+frame; кадр не содержал identity карты; consumer считал любую новую загрузку
+свежей, даже после зависания producer. FramePublishPolicy отвергает кадры другой
+сцены, старый frame и capture с задержкой больше 500ms. Slot descriptor содержит
+scene int64 по offset104; host pose mapping — тот же token по offset88. Формат
+остаётся version1 с прежними размерами; обе стороны обновляются вместе.
+Consumer дополнительно проверяет размеры, конечность координат и проекцию,
+сбрасывает старый кадр при новой сцене; pose flags публикуются после проверки seq.
+
+Scene token детерминирован по map+epoch. MapBuilds получает одну immutable
+Selection и применяет её на server tick; transient block changes очищаются при
+переходе/attach/detach. Sync job перепроверяет сцену до обхода блоков. Block
+snapshot, delta, physics и combat notices относятся к своей сцене; bridge
+отбрасывает старые сообщения. Durable reward/pickup ack остаются межкартовыми.
+Same-map restart сбрасывает effects и sync scheduling; pose freshness учитывает
+round epoch. Это закрывает возврат невидимых коллизий запоздавшими пакетами.
+
+Итог: 54 Python проверки, 6 JVM regression programs, standalone Source checks,
+native x86 PE и полная сборка проходят. Семь компонентов обновлены и SHA-256
+проверены. Агент повторно проверил startup/reconnect/map-change поток и не нашёл
+блокирующих ошибок. Игры не запускались; визуальное поведение GPU и игровых
+коллизий остаётся непроверенным в настоящей сессии.
