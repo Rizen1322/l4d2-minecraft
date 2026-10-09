@@ -16,7 +16,7 @@ class GameplayMailbox:
     def __init__(self,path):
         self.path=path;self.generation=uuid.uuid4().hex[:12]
         self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
-        self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={};self.protection=None;self.protection_at=0
+        self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={};self.protection=None;self.protection_at=0;self.effects=None;self.effects_at=0
 
     def apply(self,message):
         kind=message.get('t')
@@ -63,10 +63,14 @@ class GameplayMailbox:
             if not isinstance(e,list) or len(e)!=5 or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=20 for v in e):raise ValueError('invalid enchantments')
             if type(r) is not int or not 0<=r<=4 or type(f) is not bool:raise ValueError('invalid status effects')
             self.protection=(*e,r,int(f));self.protection_at=time.monotonic()
-        elif kind=='rewardack':
+        elif kind=='effects':
+            speed=message.get('speed');burn=message.get('burn')
+            if type(speed) not in (int,float) or not math.isfinite(speed) or not .25<=speed<=2 or type(burn) is not bool:raise ValueError('invalid environmental effects')
+            self.effects=(speed,int(burn));self.effects_at=time.monotonic()
+        elif kind in ('rewardack','pickupack'):
             key=message.get('key')
             if not isinstance(key,str) or not 1<=len(key)<=128 or not all(c.isascii() and (c.isalnum() or c=='_') for c in key):raise ValueError('invalid reward receipt')
-            event=('rewardack',key)
+            event=(kind,key)
         elif kind=='meal':
             h=message.get('h');g=message.get('golden',False)
             if type(h) not in (int,float) or not math.isfinite(h) or not 0<h<=100 or type(g) is not bool:raise ValueError('invalid meal')
@@ -117,7 +121,7 @@ class GameplayMailbox:
     def publish(self,map_name,*,active=True,gui=False,sprint=False,attack=False,use=False):
         if not map_name or not all(c.isascii() and (c.isalnum() or c=='_') for c in map_name):raise ValueError('invalid map')
         if self.map is not None and self.map!=map_name:
-            self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[];self.navigation.clear();self.protection=None
+            self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[];self.navigation.clear();self.protection=None;self.effects=None
         self.map=map_name
         records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)}']
         if active:
@@ -125,6 +129,8 @@ class GameplayMailbox:
             records+=[' '.join(map(str,('nav',*row))) for row,at in self.navigation.values() if time.monotonic()-at<1.5]
             if time.monotonic()-self.signals_at<0.75:
                 records+=[' '.join(map(str,('signal',*e))) for e in self.signals]
+            if self.effects is not None and time.monotonic()-self.effects_at<0.75:
+                records.append(' '.join(map(str,('effects',*self.effects))))
             if self.protection is not None and time.monotonic()-self.protection_at<0.75:
                 records.append(' '.join(map(str,('protection',*self.protection))))
             if self.equipment is not None and time.monotonic()-self.equipment_at<0.75:

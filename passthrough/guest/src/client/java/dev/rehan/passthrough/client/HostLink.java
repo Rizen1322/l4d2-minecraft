@@ -82,7 +82,7 @@ public final class HostLink extends WebSocketServer {
 		try {
 			JsonObject m = JsonParser.parseString(message).getAsJsonObject();
             if(!m.get("t").getAsString().equals("attach") && conn!=this.controller)return;
-            if(m.has("rid"))synchronized(delivered) {
+            if(m.has("rid") && !m.get("t").getAsString().equals("pickup"))synchronized(delivered) {
                 int rid=m.get("rid").getAsInt();if(!delivered.add(rid))return;
                 if(delivered.size()>256)delivered.remove(delivered.iterator().next());
             }
@@ -132,6 +132,8 @@ public final class HostLink extends WebSocketServer {
                 case "chapterreward" -> dev.rehan.passthrough.CampaignRewards.claim(m.get("key").getAsString(),m.get("map").getAsString(),m.get("finale").getAsBoolean(),m.get("difficulty").getAsInt());
                 case "hosthealth" -> dev.rehan.passthrough.SurvivalFeatures.hostHealth(m.getAsJsonArray("h"));
                 case "equipmenthit" -> dev.rehan.passthrough.SurvivalFeatures.equipmentHit(m.get("d").getAsInt(),m.get("shield").getAsBoolean());
+                case "shieldcooldown" -> dev.rehan.passthrough.SurvivalFeatures.shieldCooldown(m.get("ticks").getAsInt());
+                case "pickup" -> dev.rehan.passthrough.SurvivalFeatures.pickup(m.get("item").getAsString(),m.get("key").getAsString());
                 case "supply" -> {
                     JsonArray p=m.getAsJsonArray("pos");dev.rehan.passthrough.SurvivalFeatures.supply(p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble(),m.get("kind").getAsInt());
                 }

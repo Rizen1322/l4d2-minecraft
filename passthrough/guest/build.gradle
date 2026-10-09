@@ -76,3 +76,10 @@ tasks.register('verifyViewSizePolicy', JavaExec) {
     mainClass = 'dev.rehan.passthrough.ViewSizePolicyTest'
 }
 check.dependsOn verifyViewSizePolicy
+
+tasks.register('verifyPickupPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.PickupPolicyTest'
+}
+check.dependsOn verifyPickupPolicy

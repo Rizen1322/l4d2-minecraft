@@ -50,8 +50,12 @@ L4D2MCBridge.Movement <- function(player,gui,sprint) {
         if(gameplay.frozen[id].entity==player && !gameplay.frozen[id].old)NetProps.SetPropInt(player,"m_fFlags",NetProps.GetPropInt(player,"m_fFlags")&(~32));
         delete gameplay.frozen[id];
     }
-    // Walking, jumping, acceleration and aim belong to L4D2.
-    if(id in gameplay.movement) {
+    // Retain Source acceleration/jumping; potion speed only multiplies its native movement scale.
+    local factor=("effectsAt" in survival && Time()-survival.effectsAt<0.75)?survival.speed:1.0;
+    if(factor!=1.0 && !gui) {
+        if(!(id in gameplay.movement))gameplay.movement[id]<-{entity=player,old=NetProps.GetPropFloat(player,"m_flLaggedMovementValue")};
+        NetProps.SetPropFloat(player,"m_flLaggedMovementValue",gameplay.movement[id].old*factor);
+    } else if(id in gameplay.movement) {
         local saved=gameplay.movement[id];
         if(saved.entity.IsValid())NetProps.SetPropFloat(saved.entity,"m_flLaggedMovementValue",saved.old);
         delete gameplay.movement[id];
@@ -92,6 +96,20 @@ L4D2MCBridge.Raycast <- function(start,end,ignore) {
     local trace={start=start,end=end,ignore=ignore,mask=1174421507}; // MASK_SHOT, world + hitboxes.
     TraceLine(trace);return trace;
 };
+// Retail TraceLine omits plane normals. Estimate the slope from two local floor probes.
+L4D2MCBridge.WalkableFloor <- function(t,ignore) {
+    if (!("hit" in t && t.hit) || ("startsolid" in t && t.startsolid))return false;
+    if("normal" in t)return t.normal.z>=0.7;
+    if("plane_normal" in t)return t.plane_normal.z>=0.7;
+    local slopes=[];
+    foreach(offset in [Vector(4,0,0),Vector(0,4,0)]) {
+        local q=t.pos+offset;
+        local probe={start=q+Vector(0,0,8),end=q-Vector(0,0,8),ignore=ignore,mask=16395};TraceLine(probe);
+        if (!("hit" in probe && probe.hit) || ("startsolid" in probe && probe.startsolid))return false;
+        slopes.append((probe.pos.z-t.pos.z)/4);
+    }
+    return slopes[0]*slopes[0]+slopes[1]*slopes[1]<=1.0408; // normal.z >= .7
+};
 L4D2MCBridge.Usable <- function(player) {
     local p=player.EyePosition(),trace=Raycast(p,p+player.EyeAngles().Forward()*96,player);
     if(!("enthit" in trace) || trace.enthit==null)return false;
@@ -99,13 +117,17 @@ L4D2MCBridge.Usable <- function(player) {
     if(name!=null && (name.find("l4d2mc_collision_")==0 || name.find("l4d2mc_entity_")==0))return false;
     return kind.find("door")!=null || kind=="func_button" || kind.find("weapon_")==0 || kind.find("prop_physics")==0 || kind=="func_useableladder";
 };
+L4D2MCBridge.CarryItem <- function(kind) {
+    return kind=="weapon_gascan" || kind=="weapon_cola_bottles" || kind=="weapon_gnome" || kind=="weapon_fireworkcrate" || kind.find("weapon_upgradepack_")==0;
+};
 L4D2MCBridge.HeldActions <- function(player,attack,use,gui) {
     if(!NetProps.HasProp(player,"m_afButtonForced"))return;
     local id=player.GetEntityIndex(),flags=NetProps.GetPropInt(player,"m_afButtonForced");
     if(!(id in gameplay.forced) || gameplay.forced[id].entity!=player)gameplay.forced[id]<-{entity=player,old=flags&33};
     local wanted=0;
+    if(!use && "dropLatch" in survival)survival.dropLatch=false;
     local weapon=NetProps.GetPropEntity(player,"m_hActiveWeapon"),kind=weapon!=null?weapon.GetClassname():"";
-    local carry=kind=="weapon_gascan" || kind=="weapon_cola_bottles" || kind=="weapon_gnome" || kind=="weapon_fireworkcrate" || kind.find("weapon_upgradepack_")==0;
+    local carry=CarryItem(kind);
     local directUse=false;
     if(use) {
         local p=player.EyePosition(),t=Raycast(p,p+player.EyeAngles().Forward()*96,player);
@@ -113,7 +135,7 @@ L4D2MCBridge.HeldActions <- function(player,attack,use,gui) {
             local cls=t.enthit.GetClassname();directUse=cls.find("door")!=null || cls=="func_button";
         }
     }
-    if(!gui && use && !directUse && (Usable(player) || carry))wanted=wanted|32; // IN_USE, normal Source use/hold processing.
+    if(!gui && use && !("dropLatch" in survival && survival.dropLatch) && !directUse && (Usable(player) || carry))wanted=wanted|32; // IN_USE, normal Source use/hold processing.
     if(!gui && attack && carry)wanted=wanted|1; // IN_ATTACK only for map carry/use items, never hidden guns.
     NetProps.SetPropInt(player,"m_afButtonForced",(flags&(~33))|gameplay.forced[id].old|wanted);
 };
@@ -172,6 +194,8 @@ L4D2MCBridge.Event <- function(fields,player) {
             try {EntFire(name,"Explode","",0,player);}catch(error){blast.Kill();throw error;}
         }
         printl("[L4D2MC COMBAT] explosion "+p+" radius="+radius);
+    } else if(kind=="pickupack" && fields.len()==4) {
+        PickupAck(fields[3]);
     } else if(kind=="rewardack" && fields.len()==4) {
         RewardAck(fields[3]);
     } else if(kind=="link" && fields.len()==6) {
@@ -204,18 +228,31 @@ L4D2MCBridge.Event <- function(fields,player) {
         if(fields.len()>=6 && Integer(fields[5])==1)CutTongue(player);
         local damage=Number(fields[3],1500),range=Number(fields[4],256);
         if(damage<0 || range<=0)throw "invalid melee";
-        local p=player.EyePosition(),trace=Raycast(p,p+player.EyeAngles().Forward()*range,player);
-        if("enthit" in trace && IsCombatTarget(trace.enthit)) {
-            local tier=fields.len()==7?Integer(fields[6]):0;if(tier>2)throw "invalid sword tier";
-            if(tier>0) {
-                if("swordAt" in survival && Time()-survival.swordAt<0.35)return;
-                survival.swordAt<-Time();
-                local extra=damage/15-(tier==2?8:7);if(extra<0)extra=0;
-                damage=(tier==2?220.0:180.0)+extra*15;
-                if(trace.enthit.GetClassname()=="infected")damage=trace.enthit.GetHealth()+1.0;
+        local p=player.EyePosition(),forward=player.EyeAngles().Forward();
+        local tier=fields.len()==7?Integer(fields[6]):0;if(tier>2)throw "invalid sword tier";
+        local blade=fields.len()>=6 && Integer(fields[5])==1;
+        if(blade) {
+            if("swordAt" in survival && Time()-survival.swordAt<0.35)return;
+            survival.swordAt<-Time();
+        }
+        if(tier>0){local extra=damage/15-(tier==2?8:7);if(extra<0)extra=0;damage=(tier==2?220.0:180.0)+extra*15;}
+        local targets=[],direct=Raycast(p,p+forward*range,player);
+        if("enthit" in direct && IsCombatTarget(direct.enthit))targets.append(direct.enthit);
+        if(blade)foreach(cls in ["infected","player","witch"]) {
+            local e=null;
+            while((e=Entities.FindByClassnameWithin(e,cls,p,range+32))!=null && targets.len()<8) {
+                if(e==player || e.GetHealth()<=0 || (cls=="player" && e.IsSurvivor()) || targets.find(e)!=null)continue;
+                local delta=e.GetOrigin()+Vector(0,0,32)-p,d=delta.Length();
+                if(d<0.01 || d>range || (delta.x*forward.x+delta.y*forward.y+delta.z*forward.z)/d<0.5)continue;
+                local t=Raycast(p,p+delta,player);
+                if("hit" in t && t.hit && (!("enthit" in t) || t.enthit!=e))continue;
+                targets.append(e);
             }
-            trace.enthit.TakeDamage(damage,128,player); // DMG_CLUB, Source attribution retained.
-            printl("[L4D2MC COMBAT] melee damage="+damage);
+        }
+        foreach(e in targets) {
+            if(e==player || (e.GetClassname()=="player" && e.IsSurvivor()))continue;
+            local hit=tier>0 && e.GetClassname()=="infected"?e.GetHealth()+1.0:damage;
+            e.TakeDamage(hit,128,player);
         }
     } else if(kind=="mobhit" && fields.len()==9) {
         local id=Integer(fields[3]),damage=Number(fields[4],500);
@@ -233,6 +270,8 @@ L4D2MCBridge.Event <- function(fields,player) {
         local id=Integer(fields[3]);
         if(id in gameplay.replies)delete gameplay.replies[id];
     } else if(kind=="interact" && fields.len()==3) {
+        local held=player.GetActiveWeapon();
+        if(held!=null && (CarryItem(held.GetClassname()) || held.GetClassname()=="weapon_melee")) {player.DropItem(held.GetClassname());survival.dropLatch<-true;return;}
         local p=player.EyePosition(),trace=Raycast(p,p+player.EyeAngles().Forward()*96,player);
         if("enthit" in trace && trace.enthit!=null) {
             local kind=trace.enthit.GetClassname();
@@ -378,8 +417,7 @@ L4D2MCBridge.GroundPhysics <- function() {
             local at=axis<2?Vector(edge*32,p.y,p.z):Vector(p.x,-edge*32,p.z);at+=dir*2;
             local top={start=at+Vector(0,0,40),end=at-Vector(0,0,2),ignore=ignore,mask=16395};TraceLine(top);
             if(("startsolid" in top && top.startsolid) || !("hit" in top && top.hit))continue;
-            local normal="normal" in top?top.normal:("plane_normal" in top?top.plane_normal:null);
-            if(normal==null || normal.z<0.7 || top.pos.z<=p.z+2 || top.pos.z>p.z+32)continue;
+            if(!WalkableFloor(top,ignore) || top.pos.z<=p.z+2 || top.pos.z>p.z+32)continue;
             local clear=true;
             foreach(offset in [-side,0,side]) {
                 local across=axis<2?Vector(0,offset,0):Vector(offset,0,0);
@@ -446,6 +484,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
         else if(f.len()>0 && f[0]=="projectile")try{Projectile(f,player);}catch(error){printl("[L4D2MC PROJECTILE] "+error);}
         else if(f.len()>0 && f[0]=="signal")try{Signal(f,player);}catch(error){printl("[L4D2MC SIGNAL] "+error);}
         else if(f.len()>0 && f[0]=="protection")try{ProtectionEquipment(f);}catch(error){printl("[L4D2MC PROTECTION] "+error);}
+        else if(f.len()>0 && f[0]=="effects")try{Effects(f);}catch(error){printl("[L4D2MC EFFECTS] "+error);}
         else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
         else if(f.len()>0 && f[0]=="physics")try{Physics(f,player);}catch(error){printl("[L4D2MC PHYSICS] "+error);}
     }

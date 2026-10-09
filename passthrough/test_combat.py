@@ -149,3 +149,18 @@ class CombatTests(unittest.TestCase):
             with patch('combat.time.monotonic',return_value=12):box.publish('c1m1_hotel')
             self.assertNotIn('nav 7',box.path.read_text())
             with self.assertRaises(ValueError):box.apply({'t':'nav','id':True,'q':1,'from':[0,0,0],'goal':[0,0,0],'w':1,'h':2})
+
+class EnvironmentalTests(unittest.TestCase):
+    def test_effects_expire_and_clear_at_map_change(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'mailbox';box=GameplayMailbox(p)
+            with patch('combat.time.monotonic',return_value=10):
+                box.apply({'t':'effects','speed':1.2,'burn':True});box.publish('c1m1_hotel')
+                self.assertIn('effects 1.2 1',p.read_text())
+            with patch('combat.time.monotonic',return_value=11):
+                box.publish('c1m1_hotel');self.assertNotIn('effects',p.read_text())
+                box.apply({'t':'effects','speed':1.2,'burn':True});box.publish('c1m2_streets')
+                self.assertNotIn('effects',p.read_text())
+            for speed in [float('nan'),-1,3]:
+                with self.assertRaises(ValueError):box.apply({'t':'effects','speed':speed,'burn':True})

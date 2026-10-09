@@ -32,14 +32,15 @@ public final class CampaignRewards {
             else Passthrough.LOG.error("Reward remains in Source outbox until player checkpoint succeeds");
         });
     }
-    private static boolean checkpoint(MinecraftServer s,ServerPlayer p,String key){
+    public static boolean checkpoint(MinecraftServer s,ServerPlayer p,String key){
         // saveEverything returns chunk status; player IO failures can be swallowed by Minecraft.
         // Read back the actual atomic player file before clearing the Source outbox.
         try {
-            s.saveEverything(true,true,true);
+            if(key.startsWith("pickup_"))s.getPlayerList().saveAll();else s.saveEverything(true,true,true);
             var file=s.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("playerdata").resolve(p.getUUID()+".dat");
             var saved=net.minecraft.nbt.NbtIo.readCompressed(file,net.minecraft.nbt.NbtAccounter.create(32L*1024*1024));
-            return RewardLedger.decode(saved.getString("l4d2mcRewards").orElseThrow()).claimed.contains(key);
+            var ledger=RewardLedger.decode(saved.getString("l4d2mcRewards").orElseThrow());
+            return (key.startsWith("pickup_")?ledger.pickups:ledger.claimed).contains(key);
         }catch(Exception ex){Passthrough.LOG.error("Reward receipt not durable; Source outbox retained",ex);return false;}
     }
     private static void ack(String key){Passthrough.events.accept("{\"t\":\"rewardack\",\"key\":\""+key+"\"}");}
@@ -48,9 +49,11 @@ public final class CampaignRewards {
         var reserve=data.reserve;if(reserve.isEmpty())return;
         boolean changed=false;
         for(var e:new ArrayList<>(reserve.entrySet())) {
-            var item=BuiltInRegistries.ITEM.getOptional(Identifier.withDefaultNamespace(e.getKey()));if(item.isEmpty())continue;
+            var item=BuiltInRegistries.ITEM.getOptional(Identifier.withDefaultNamespace(e.getKey()));
+            boolean custom=e.getKey().equals("speed_potion") || e.getKey().equals("slowness_potion");if(item.isEmpty() && !custom)continue;
             int amount=Math.min(64,e.getValue());if(amount<=0){reserve.remove(e.getKey());changed=true;continue;}
-            ItemStack stack=new ItemStack(item.get(),amount);p.getInventory().add(stack);
+            ItemStack stack=custom?SurvivalFeatures.pickupStack(e.getKey()):new ItemStack(item.get(),amount);
+            if(custom)amount=1;p.getInventory().add(stack);
             int inserted=amount-stack.getCount();if(inserted<=0)continue;
             int remaining=e.getValue()-inserted;if(remaining==0)reserve.remove(e.getKey());else reserve.put(e.getKey(),remaining);changed=true;
         }

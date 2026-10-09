@@ -96,6 +96,21 @@ class RewardOutbox:
             result.append({'t':'chapterreward','key':key,'map':map_name,'finale':finale=='1','difficulty':int(difficulty)})
         return result
 
+class PickupOutbox:
+    ITEMS={'golden_apple','cookie','speed_potion','flint_and_steel','tnt','slowness_potion','wooden_sword',
+           'stone_sword','iron_sword','diamond_sword','netherite_sword','bow','crossbow','totem_of_undying'}
+    def __init__(self,path):self.path=path
+    def read(self):
+        try:content=self.path.read_text(encoding='ascii').rstrip('\x00\r\n ')
+        except (OSError,UnicodeError):return []
+        if len(content)>16384:return []
+        result=[]
+        for line in content.splitlines()[:64]:
+            f=line.split()
+            if len(f)==2 and re.fullmatch(r'pickup_[A-Za-z0-9_]{1,112}',f[0]) and f[1] in self.ITEMS:
+                result.append({'t':'pickup','key':f[0],'item':f[1]})
+        return result
+
 class SourceSnapshot:
     """Retain a validated pose through a partial StringToFile write, never indefinitely."""
     def __init__(self,path):self.path=path;self.sample=None;self.identity=None;self.changed=-1e30
@@ -289,13 +304,16 @@ class RenderPose(FrameHeartbeat):
                 self.view=self.kernel.MapViewOfFile(self.handle,4,0,0,128)
         if not self.view:
             return None
-        data=ctypes.string_at(self.view,64)
+        data=ctypes.string_at(self.view,128)
         magic,seq,stamp,x,y,z,yaw,pitch,roll,fov=struct.unpack_from(POSE_FORMAT,data)
         after=ctypes.c_uint32.from_address(self.view+4).value
         self.kernel.GetTickCount64.restype=ctypes.c_ulonglong
         if magic!=0x50434D4C or seq&1 or after!=seq or not 0<=self.kernel.GetTickCount64()-stamp<100:
             return None
-        return {'p':[x,y,z],'r':[yaw,pitch,roll],'fov':fov,'render_sequence':seq}
+        result={'p':[x,y,z],'r':[yaw,pitch,roll],'fov':fov,'render_sequence':seq}
+        if struct.unpack_from('<I',data,116)[0]==0x424f4459:
+            result['pl']=list(struct.unpack_from('<ddd',data,88));result['h']=struct.unpack_from('<f',data,112)[0]
+        return result
 
 
 def render_camera(pose, actual, previous=None):
@@ -307,7 +325,9 @@ def render_camera(pose, actual, previous=None):
     """
     result = dict(pose)
     if actual and all(math.isfinite(v) for v in actual['p']) and math.dist(actual['p'], pose['p']) <= 8:
-        result.update(actual)
+        result.update({k:v for k,v in actual.items() if k not in ('pl','h')})
+        if 'pl' in actual and all(math.isfinite(v) for v in actual['pl']) and math.dist(actual['pl'],pose['pl'])<=8 and math.isfinite(actual.get('h',0)):
+            result['pl']=actual['pl'];result['h']=actual.get('h',pose['h'])
     elif previous:
         result['fov'] = previous['fov']
     return result
@@ -332,7 +352,7 @@ def camera(sample, aspect):
     vfov = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) / (4 / 3)))
     return {"t": "cam", "f": int(sample["f"]), "p": position(sample["p"]),
             "pl": position(sample["feet"]), "r": [-yaw - 90, pitch, -roll],
-            "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"sneak":bool(sample.get("buttons",0)&4)}
+            "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"carrying":bool(sample.get("carrying",False)),"burning":bool(sample.get("burning",False)),"sneak":bool(sample.get("buttons",0)&4)}
 
 
 def surface(sample):
@@ -352,8 +372,9 @@ def surface(sample):
     if abs(v - round(v)) < 1/64:
         v = round(v)
     # A Source floor/wall need not coincide with the voxel grid. Choose the
-    # first WHOLE cell outside it, rather than a cell straddling the brush.
-    cell[axis] = math.ceil(v) if sign > 0 else math.floor(v) - 1
+    # nearest floor cell to avoid a full-block hover on rough terrain. Walls
+    # and ceilings still select a whole cell outside the brush.
+    cell[axis] = math.floor(v + .5) if axis == 1 and sign > 0 else (math.ceil(v) if sign > 0 else math.floor(v) - 1)
     return {'pos': hit, 'cell': cell, 'face': axis * 2 + (1 if sign > 0 else 0)}
 
 
@@ -479,6 +500,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
     gameplay = GameplayMailbox(sample_path.with_name('l4d2mc_gameplay.txt'))
     source=SourceSnapshot(sample_path)
     rewards=RewardOutbox(sample_path.with_name('l4d2mc_rewards.txt'))
+    pickups=PickupOutbox(sample_path.with_name('l4d2mc_pickups.txt'))
     last_frame = None
     while True:
         try:
@@ -554,7 +576,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 if sample['f']!=last_reply_frame:
                                     for reply in sample.get('replies',[])[:64]:
                                         await socket.send(json.dumps(reply))
-                                        if 'rid' in reply:gameplay.apply({'t':'replyack','id':reply['rid']})
+                                        if 'rid' in reply and reply.get('t')!='pickup':gameplay.apply({'t':'replyack','id':reply['rid']})
                                     last_reply_frame=sample['f']
                                 if 'wheel' in sample:
                                     wheel=sample['wheel']
@@ -564,7 +586,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
                     if time.monotonic()-last_rewards>1.0:
-                        for reward in rewards.read():await socket.send(json.dumps(reward))
+                        for reward in rewards.read()+pickups.read():await socket.send(json.dumps(reward))
                         last_rewards=time.monotonic()
                     host_menu=render.menu_open()
                     if host_menu and not was_host_menu:

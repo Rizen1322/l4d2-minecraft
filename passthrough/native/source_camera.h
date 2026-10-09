@@ -8,7 +8,7 @@
 // Read-only view API: no hooks, engine writes or offsets into player structures.
 // Slot references: Lak3/l4d2-internal-base SDK/L4D2/Interfaces/EngineClient.h.
 namespace source_camera {
-struct Sample { double x,y,z; float yaw,pitch,roll,fov,nearPlane,farPlane; };
+struct Sample { double x,y,z; float yaw,pitch,roll,fov,nearPlane,farPlane; double bodyX=0,bodyY=0,bodyZ=0; float bodyYaw=0; bool bodyValid=false; };
 inline bool readable(const void* p, size_t bytes) {
     MEMORY_BASIC_INFORMATION m{};
     if (!p || !VirtualQuery(p,&m,sizeof(m)) || m.State!=MEM_COMMIT || (m.Protect&(PAGE_NOACCESS|PAGE_GUARD))) return false;
@@ -87,6 +87,31 @@ inline bool read(Sample& s) {
         !(s.nearPlane>0&&s.nearPlane<100&&s.farPlane>s.nearPlane)) return false;
     return true;
 }
+// Same-frame interpolated client body, rather than a newer server simulation tick.
+// L4D2 IHandleEntity (3 slots), IClientUnknown (8), IClientEntity Release (1): AbsOrigin=12, AbsAngles=13.
+inline void body(Sample& s) {
+    static void* engine=nullptr;static void* entities=nullptr;
+    auto acquire=[](const wchar_t* moduleName,const char* version)->void* {
+        auto module=GetModuleHandleW(moduleName);
+        auto factory=module?reinterpret_cast<void*(__cdecl*)(const char*,int*)>(GetProcAddress(module,"CreateInterface")):nullptr;
+        return factory?factory(version,nullptr):nullptr;
+    };
+    if(!engine)engine=acquire(L"engine.dll","VEngineClient013");
+    if(!entities)entities=acquire(L"client.dll","VClientEntityList003");
+    if(!readable(engine,sizeof(void*)) || !readable(entities,sizeof(void*)))return;
+    auto et=*reinterpret_cast<void***>(engine),list=*reinterpret_cast<void***>(entities);
+    if(!readable(et,13*sizeof(void*)) || !readable(list,4*sizeof(void*)))return;
+    int index=reinterpret_cast<int(__thiscall*)(void*)>(et[12])(engine);if(index<1 || index>64)return;
+    void* entity=reinterpret_cast<void*(__thiscall*)(void*,int)>(list[3])(entities,index);
+    if(!readable(entity,sizeof(void*)))return;
+    auto table=*reinterpret_cast<void***>(entity);if(!readable(table,14*sizeof(void*)))return;
+    using VectorFn=const float*(__thiscall*)(void*);
+    const float* pos=reinterpret_cast<VectorFn>(table[12])(entity);
+    const float* angles=reinterpret_cast<VectorFn>(table[13])(entity);
+    if(!readable(pos,12) || !readable(angles,12))return;
+    for(int i=0;i<3;i++)if(!std::isfinite(pos[i]) || std::abs(pos[i])>32736 || !std::isfinite(angles[i]))return;
+    s.bodyX=pos[0]/32.0;s.bodyY=pos[2]/32.0;s.bodyZ=-pos[1]/32.0;s.bodyYaw=-angles[1]-90;s.bodyValid=true;
+}
 inline void publish_visibility(bool ready) {
     static HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,128,L"Local\\L4D2MinecraftRenderPose");
     static uint8_t* data=map?static_cast<uint8_t*>(MapViewOfFile(map,FILE_MAP_WRITE,0,0,128)):nullptr;
@@ -100,10 +125,13 @@ inline void publish(const Sample& s) {
     static uint8_t* data=map?static_cast<uint8_t*>(MapViewOfFile(map,FILE_MAP_WRITE,0,0,128)):nullptr;
     static uint32_t sequence=0;
     if(!data) return;
+    Sample measured=s;body(measured);
     sequence+=2;
     auto write=[&](size_t offset,auto value){std::memcpy(data+offset,&value,sizeof(value));};
     write(4,sequence-1);MemoryBarrier();write(0,uint32_t(0x50434D4C));write(8,GetTickCount64());
     write(16,s.x);write(24,s.y);write(32,s.z);write(40,s.yaw);write(44,s.pitch);write(48,s.roll);write(52,s.fov);
-    write(56,s.nearPlane);write(60,s.farPlane);MemoryBarrier();write(4,sequence);
+    write(56,s.nearPlane);write(60,s.farPlane);
+    write(88,measured.bodyX);write(96,measured.bodyY);write(104,measured.bodyZ);write(112,measured.bodyYaw);
+    write(116,uint32_t(measured.bodyValid?0x424f4459:0));MemoryBarrier();write(4,sequence);
 }
 }

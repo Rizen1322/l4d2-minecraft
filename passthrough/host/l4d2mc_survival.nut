@@ -2,6 +2,29 @@
 if(!("survival" in L4D2MCBridge))L4D2MCBridge.survival<-{
     equipmentAt=-100.0,armor=0.0,toughness=0.0,blocking=false,player=null,
     protectionAt=-100.0,epf=[0,0,0,0,0],resistance=0,fireproof=false,meal=0.0,nextMeal=0.0,nextPressure=0.0,pressureIndex=0,replySerial=RandomInt(1000000000,1500000000),hook=false,hookLiveAt=-100.0,links={},shieldHits={},fires=[],nextShield=0.0,nextIgnite=0.0,golems={},nextAggro=0.0,aggroHits={}};
+if(!("speed" in L4D2MCBridge.survival)) {
+    L4D2MCBridge.survival.speed<-1.0;L4D2MCBridge.survival.effectsAt<- -100.0;
+    L4D2MCBridge.survival.guestBurn<-false;L4D2MCBridge.survival.nextBurn<-0.0;
+}
+if(!("shieldCharge" in L4D2MCBridge.survival)) {
+    L4D2MCBridge.survival.shieldCharge<-6;L4D2MCBridge.survival.shieldCooldown<-0.0;
+    L4D2MCBridge.survival.shieldHitAt<-{};
+}
+L4D2MCBridge.ShieldAvailable <- function(){return Time()>=survival.shieldCooldown && survival.shieldCharge>0;};
+L4D2MCBridge.ShieldSpend <- function(e) {
+    if(!ShieldAvailable())return false;
+    local id=e.GetEntityIndex();
+    if(id in survival.shieldHitAt && survival.shieldHitAt[id].entity==e && Time()-survival.shieldHitAt[id].at<1.2)return true;
+    survival.shieldHitAt[id]<-{entity=e,at=Time()};
+    survival.shieldCharge-=e.GetClassname()=="player"?2:1;
+    if(survival.shieldCharge<=0){survival.shieldCharge=0;survival.shieldCooldown=Time()+5;Reply("\"t\":\"shieldcooldown\",\"ticks\":100");}
+    return true;
+};
+L4D2MCBridge.Effects <- function(f) {
+    if(f.len()!=3)return;
+    local speed=Number(f[1],2),burn=Integer(f[2]);if(speed<0.25 || burn>1)return;
+    survival.speed=speed;survival.guestBurn=burn==1;survival.effectsAt=Time();
+};
 L4D2MCBridge.Reply <- function(body) {
     local count=0;foreach(id,value in gameplay.replies)count++;
     if(count>=64)return;
@@ -59,6 +82,7 @@ L4D2MCBridge.Protection <- function(victim,attacker,amount,type=0) {
     }
     local physical=(type&(2|4|128|4096|2097152|536870912))!=0 || (type==0 && enemy);
     if(physical && enemy && survival.blocking && !tank && ShieldFacing(victim,attacker)) {
+        if(!ShieldSpend(attacker))return 1.0;
         Reply(format("\"t\":\"equipmenthit\",\"d\":%d,\"shield\":true",amount.tointeger()>0?amount.tointeger():1));
         return 0.1;
     }
@@ -86,7 +110,7 @@ L4D2MCBridge.InstallProtection <- function() {
     scope.l4d2mcDamageHook<-true;survival.hook=true;
 };
 L4D2MCBridge.ShieldFacing <- function(player,enemy) {
-    if(!GameplayLease() || player!=survival.player || !survival.blocking || Time()-survival.equipmentAt>0.5)return false;
+    if(!ShieldAvailable() || !GameplayLease() || player!=survival.player || !survival.blocking || Time()-survival.equipmentAt>0.5)return false;
     if(enemy==null || !enemy.IsValid() || player.GetHealth()<=0 || player.IsIncapacitated())return false;
     local delta=enemy.GetOrigin()-player.GetOrigin(),f=player.EyeAngles().Forward();delta.z=0;f.z=0;
     return delta.Length()>0.01 && f.Length()>0.01 && (delta.x*f.x+delta.y*f.y)/(delta.Length()*f.Length())>=0.5;
@@ -96,6 +120,7 @@ L4D2MCBridge.ShieldRepel <- function(player,e) {
     if(id in survival.shieldHits && survival.shieldHits[id].entity==e && Time()-survival.shieldHits[id].at<1.2)return;
     local t=Raycast(player.EyePosition(),e.GetOrigin()+Vector(0,0,32),player);
     if("hit" in t && t.hit && (!("enthit" in t) || t.enthit!=e))return;
+    if(!ShieldSpend(e))return;
     if(e.GetClassname()=="player")e.Stagger(player.GetOrigin());
     else e.TakeDamage(1,33554432,player); // Source DMG_STUMBLE, normal infected shove.
     survival.shieldHits[id]<-{entity=e,at=Time()};
@@ -107,6 +132,9 @@ L4D2MCBridge.CutTongue <- function(player) {
     if(smoker!=null && smoker.IsValid() && smoker.GetClassname()=="player" && smoker.GetZombieType()==1)smoker.Stagger(player.GetOrigin());
 };
 L4D2MCBridge.ShieldTick <- function(player) {
+    if(survival.shieldCharge<=0 && Time()>=survival.shieldCooldown){survival.shieldCharge=6;survival.shieldHitAt.clear();}
+    local oldHits=[];foreach(id,v in survival.shieldHitAt)if(!v.entity.IsValid() || Time()-v.at>5)oldHits.append(id);
+    foreach(id in oldHits)delete survival.shieldHitAt[id];
     if(Time()<survival.nextShield)return;survival.nextShield=Time()+0.05;
     local stale=[];foreach(id,v in survival.shieldHits)if(!v.entity.IsValid() || Time()-v.at>3)stale.append(id);
     foreach(id in stale)delete survival.shieldHits[id];
@@ -117,9 +145,9 @@ L4D2MCBridge.ShieldTick <- function(player) {
             if(e.GetHealth()<=0 || !ShieldFacing(player,e))continue;
             if(cls=="player") {
                 if(e.IsSurvivor())continue;
-                local k=e.GetZombieType();if(k!=3 && k!=5)continue; // Hunter/Jockey airborne approach only.
+                local k=e.GetZombieType();if(k!=3 && k!=5 && k!=6)continue; // Hunter/Jockey/Charger approaches.
                 local d=player.GetOrigin()-e.GetOrigin(),v=e.GetVelocity();
-                if((NetProps.GetPropInt(e,"m_fFlags")&1)!=0 || d.Length()>112 || d.x*v.x+d.y*v.y<=0)continue;
+                if((k!=6 && (NetProps.GetPropInt(e,"m_fFlags")&1)!=0) || d.Length()>112 || d.x*v.x+d.y*v.y<=0)continue;
                 if(abs(d.z)>96)continue;
             } else if((e.GetOrigin()-player.GetOrigin()).Length()>72)continue;
             ShieldRepel(player,e);
@@ -134,8 +162,7 @@ L4D2MCBridge.IgniteGround <- function(f,player) {
     if(!("hit" in t && t.hit) || (t.pos-p).Length()>12)return;
     local floor={start=p+Vector(0,0,4),end=p-Vector(0,0,12),ignore=player,mask=16395};TraceLine(floor);
     if(!("hit" in floor && floor.hit) || ("startsolid" in floor && floor.startsolid))return;
-    local n="normal" in floor?floor.normal:("plane_normal" in floor?floor.plane_normal:null);
-    if(n==null || n.z<0.7)return;
+    if(!WalkableFloor(floor,player))return;
     local count=0,e=null,before={};while((e=Entities.Next(e))!=null){count++;if(e.GetClassname()=="inferno")before[e.GetEntityIndex()]<-true;}
     if(count>=1400)return;
     foreach(v in survival.fires)if(v.entity.IsValid() && (v.pos-p).Length()<64)return;
@@ -146,6 +173,7 @@ L4D2MCBridge.IgniteGround <- function(f,player) {
 L4D2MCBridge.SurvivalCleanup <- function() {
     foreach(v in survival.fires)if(v.entity.IsValid())v.entity.Kill();survival.fires.clear();
     foreach(id,v in survival.golems)if(v.entity.IsValid())v.entity.Kill();survival.golems.clear();
+    survival.shieldCharge=6;survival.shieldCooldown=0;survival.shieldHitAt.clear();survival.guestBurn=false;survival.effectsAt=-100.0;
     survival.blocking=false;survival.protectionAt=-100.0;survival.shieldHits.clear();survival.aggroHits.clear();
 };
 // Eight non-solid invisible targets, not collision stand-ins. Native infected navigation pursues them.
@@ -197,7 +225,66 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
         }
     }
 };
+// Durable outbox survives chapter VM recreation and guest reconnects.
+L4D2MCBridge.QueuePickup <- function(key,kind) {
+    local text=FileToString("l4d2mc_pickups.txt");if(text==null)text="";
+    local rows=split(text,"\r\n");if(rows.len()>=64)return false;
+    foreach(row in rows){local f=split(row," ");if(f.len()==2 && f[0]==key)return true;}
+    StringToFile("l4d2mc_pickups.txt",text+key+" "+kind+"\n");
+    local saved=FileToString("l4d2mc_pickups.txt");return saved!=null && saved.find(key+" "+kind)!=null;
+};
+L4D2MCBridge.PickupAck <- function(key) {
+    local text=FileToString("l4d2mc_pickups.txt");if(text==null)return;
+    local out="";foreach(row in split(text,"\r\n")){local f=split(row," ");if(f.len()==2 && f[0]!=key)out+=row+"\n";}
+    StringToFile("l4d2mc_pickups.txt",out);
+};
+// Consume only real items owned by this local survivor; map spawns and carry objectives stay intact.
+L4D2MCBridge.ConvertPickups <- function(player) {
+    if(!("converted" in survival))survival.converted<-{};
+    if(!NetProps.HasProp(player,"m_hMyWeapons"))return;
+    local stale=[];foreach(id,v in survival.converted)if(!v.IsValid())stale.append(id);
+    foreach(id in stale)delete survival.converted[id];
+    for(local i=0;i<NetProps.GetPropArraySize(player,"m_hMyWeapons");i++) {
+        local item=NetProps.GetPropEntityArray(player,"m_hMyWeapons",i);
+        if(item==null || !item.IsValid())continue;
+        local id=item.GetEntityIndex(),cls=item.GetClassname();
+        if(id in survival.converted && survival.converted[id]==item)continue;
+        local kind=null;
+        switch(cls) {
+            case "weapon_first_aid_kit":kind="golden_apple";break;
+            case "weapon_pain_pills":kind="cookie";break;
+            case "weapon_adrenaline":kind="speed_potion";break;
+            case "weapon_molotov":kind="flint_and_steel";break;
+            case "weapon_pipe_bomb":kind="tnt";break;
+            case "weapon_vomitjar":kind="slowness_potion";break;
+            case "weapon_pistol":kind="wooden_sword";break;
+            case "weapon_pistol_magnum":kind="stone_sword";break;
+            case "weapon_smg":case "weapon_smg_silenced":case "weapon_smg_mp5":
+            case "weapon_pumpshotgun":case "weapon_shotgun_chrome":kind="iron_sword";break;
+            case "weapon_rifle":case "weapon_rifle_ak47":case "weapon_rifle_desert":case "weapon_rifle_sg552":
+            case "weapon_autoshotgun":case "weapon_shotgun_spas":case "weapon_melee":kind="diamond_sword";break;
+            case "weapon_rifle_m60":case "weapon_chainsaw":kind="netherite_sword";break;
+            case "weapon_hunting_rifle":case "weapon_sniper_military":case "weapon_sniper_awp":case "weapon_sniper_scout":kind="bow";break;
+            case "weapon_grenade_launcher":kind="crossbow";break;
+            case "weapon_defibrillator":kind="totem_of_undying";break;
+        }
+        if(kind==null || gameplay.replies.len()>=60)continue;
+        local key=format("pickup_%d_%d",epoch,Actor(item));
+        if(!QueuePickup(key,kind))continue;
+        survival.converted[id]<-item;
+        // Keep the hidden sidearm: Source requires a fallback active weapon for native carry/use.
+        if(cls!="weapon_pistol" && cls!="weapon_pistol_magnum" && cls!="weapon_melee")item.Kill();
+    }
+};
 L4D2MCBridge.SurvivalTick <- function(player) {
+    ConvertPickups(player);
+    if(survival.guestBurn && Time()-survival.effectsAt<0.75 && Time()>=survival.nextBurn) {
+        survival.nextBurn=Time()+0.5;
+        local nativeFlame=NetProps.HasProp(player,"m_hEffectEntity")?NetProps.GetPropEntity(player,"m_hEffectEntity"):null;
+        local submerged=NetProps.HasProp(player,"m_nWaterLevel") && NetProps.GetPropInt(player,"m_nWaterLevel")>0;
+        // Native flames already cause native damage; guest fire supplies only the missing path.
+        if(!submerged && (nativeFlame==null || !nativeFlame.IsValid()) && !player.IsDead())player.TakeDamage(2,8,null);
+    }
     ShieldTick(player);
     for(local i=survival.fires.len()-1;i>=0;i--)if(!survival.fires[i].entity.IsValid() || Time()>survival.fires[i].until){if(survival.fires[i].entity.IsValid())survival.fires[i].entity.Kill();survival.fires.remove(i);}
     GolemAggroTick(player);

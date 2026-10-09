@@ -111,6 +111,9 @@ final class ClientInput {
                     Passthrough.events.accept(String.format(Locale.ROOT,"{\"t\":\"melee\",\"d\":%.3f,\"r\":3.0,\"cut\":%b,\"tier\":%d}",damage,player.getMainHandItem().is(net.minecraft.tags.ItemTags.SWORDS),player.getMainHandItem().is(net.minecraft.world.item.Items.NETHERITE_SWORD)?2:player.getMainHandItem().is(net.minecraft.world.item.Items.DIAMOND_SWORD)?1:0));
                     player.resetAttackStrengthTicker();
 				}
+                if(k.equals("use") && down && player!=null && minecraft.gui.screen()==null && HostState.carrying()) {
+                    Passthrough.events.accept("{\"t\":\"interact\"}");return;
+                }
                 if(k.equals("use") && down && player!=null && minecraft.gui.screen()==null
                         && (player.getMainHandItem().is(net.minecraft.world.item.Items.FLINT_AND_STEEL)
                             || player.getOffhandItem().is(net.minecraft.world.item.Items.FLINT_AND_STEEL))) {

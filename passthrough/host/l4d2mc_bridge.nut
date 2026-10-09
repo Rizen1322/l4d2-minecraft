@@ -156,9 +156,16 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
         local own=id in L4D2MCBridge.gameplay.frozen && L4D2MCBridge.gameplay.frozen[id].entity==player && !L4D2MCBridge.gameplay.frozen[id].old;
         if(!own && !pinned)visible=false;
     }
+    local burning=(NetProps.GetPropInt(player,"m_fFlags")&134217728)!=0;
+    local flame=NetProps.HasProp(player,"m_hEffectEntity")?NetProps.GetPropEntity(player,"m_hEffectEntity"):null;
+    if(flame!=null && flame.IsValid() && flame.GetClassname()=="entityflame")burning=true;
+    local carried=player.GetActiveWeapon();
+    local carrying=carried!=null && L4D2MCBridge.CarryItem(carried.GetClassname());
     L4D2MCBridge.frame++;
     local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"hit\":%s,\"normal\":%s,\"buttons\":%d}",
         L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,surface,normal,player.GetButtonMask());
+    data=data.slice(0,data.len()-1)+",\"burning\":"+(burning?"true":"false")+"}";
+    data=data.slice(0,data.len()-1)+",\"carrying\":"+(carrying?"true":"false")+"}";
     data=data.slice(0,data.len()-1)+",\"pinned\":"+(pinned?"true":"false")+"}";
     data=data.slice(0,data.len()-1)+format(",\"epoch\":%d}",L4D2MCBridge.epoch);
     local maxHp=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;

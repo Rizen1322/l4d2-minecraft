@@ -45,7 +45,10 @@ abstract class EntityPickMixin {
                 && self.level().getBlockState(support.cell()).canBeReplaced()) {
             // Click an AIR cell outside the real Source surface. BlockItem naturally
             // replaces that cell instead of needing a saved invisible support block.
-            minecraftHit=new net.minecraft.world.phys.BlockHitResult(support.pos(),support.face(),support.cell(),false);
+            minecraftHit=new net.minecraft.world.phys.BlockHitResult(new Vec3(
+                Math.clamp(support.pos().x,support.cell().getX()+.001,support.cell().getX()+.999),
+                Math.clamp(support.pos().y,support.cell().getY()+.001,support.cell().getY()+.999),
+                Math.clamp(support.pos().z,support.cell().getZ()+.001,support.cell().getZ()+.999)),support.face(),support.cell(),false);
         }
         cir.setReturnValue(minecraftHit);
 	}

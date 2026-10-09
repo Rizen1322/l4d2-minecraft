@@ -113,7 +113,7 @@ public final class MapBuilds {
     private static void begin(String name){
         if(!pending.isEmpty() || commitPending)return;
         if(map.equals(name) && epoch==requestedEpoch){ready=true;notice();return;}
-        ready=false;HostNavigation.clear();RedstoneLinks.clear();WorldBridge.resetBarricades();
+        ready=false;SurvivalFeatures.resetEnvironment();HostNavigation.clear();RedstoneLinks.clear();WorldBridge.resetBarricades();
         try {
             Map<BlockPos,Cell> next=Map.of(); // New host round/map begins with an empty guest scene; preserve the previous archive first.
             if(map.isEmpty() && !cells.isEmpty())map="legacy_unassigned";

@@ -53,6 +53,7 @@ public final class PlayerSync {
 			return;
 		}
 
+        player.setSharedFlagOnFire(HostState.burning() || dev.rehan.passthrough.SurvivalFeatures.burning());
         minecraft.options.keyShift.setDown(HostState.isCrouching());
         float headYaw=p.firstPerson()?p.yaw():p.lookYaw();
         float headPitch=p.firstPerson()?p.pitch():p.lookPitch();

@@ -21,4 +21,6 @@ if (Test-Path -LiteralPath 'toolchains/squirrel-parser/sq.exe') {
     }
     & './toolchains/squirrel-parser/sq.exe' 'passthrough/test_protection.nut'
     if ($LASTEXITCODE -ne 0) { throw 'Source protection regression failed' }
+    & './toolchains/squirrel-parser/sq.exe' 'passthrough/test_surfaces.nut'
+    if ($LASTEXITCODE -ne 0) { throw 'Source surface/nav/shield regression failed' }
 }

@@ -101,7 +101,7 @@ L4D2MCBridge.NavTick <- function() {
         local dir=job.dir,n=job.adj++;checks++;
         local next=area.GetAdjacentArea(dir,n);if(next==null)continue;
         local key=next.GetID();
-        if(key in job.parent || job.queue.len()>=512 || next.IsBlocked(2) || next.IsDamaging())continue;
+        if(key in job.parent || job.queue.len()>=512 || next.IsBlocked(2,false) || next.IsDamaging())continue;
         local portal=NavPortal(area,next,dir,job.width,job.height);if(portal==null)continue;
         job.parent[key]<-aid;job.area[key]<-next;job.portal[key]<-portal;job.queue.append(next);
     }

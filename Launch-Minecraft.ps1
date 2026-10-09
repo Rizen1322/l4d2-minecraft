@@ -49,6 +49,8 @@ function Restore-ControlFile($snapshot) {
 if (Get-Process left4dead2 -ErrorAction SilentlyContinue) {
     throw 'Close the current L4D2 session before starting the prototype.'
 }
+& python (Join-Path $taskRoot 'passthrough\update.py') --game $Game
+if ($LASTEXITCODE -ne 0) { throw 'Built mashup update could not be applied.' }
 if (!(Test-Path -LiteralPath (Join-Path $Game 'bin\l4d2mc\L4D2Minecraft.addon32'))) {
     throw 'Install the passthrough adapter first.'
 }
@@ -84,6 +86,11 @@ try {
     # Isolate this local prototype from inconsistent Workshop survivor/infected skins.
     $addonText = [IO.File]::ReadAllText($addonList)
     $addonText = [regex]::Replace($addonText, '("[^"\r\n]+\.vpk"\s*)"[01]"', '$1"0"')
+    if ($addonText -match '"l4d2mc_hud\.vpk"') {
+        $addonText = [regex]::Replace($addonText,'("l4d2mc_hud\.vpk"\s*)"[01]"','$1"1"')
+    } else {
+        $addonText = [regex]::Replace($addonText,'}\s*$','"l4d2mc_hud.vpk" "1"' + "`n}")
+    }
     [IO.File]::WriteAllText($addonList, $addonText)
     [IO.File]::WriteAllText($cfg, "sv_cheats 1`nscript_execute l4d2mc_bridge`n", [Text.Encoding]::ASCII)
     $release = "-attack`n-attack2`n-use`n-zoom`n"

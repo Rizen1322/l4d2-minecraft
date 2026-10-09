@@ -43,7 +43,9 @@ public final class HostState {
 
 	private static final long TIMEOUT_NANOS = 2_000_000_000L;
 	private static volatile Pose latest;
-    private static volatile boolean usable,crouching;
+    private static volatile boolean usable,crouching,carrying,burning;
+    public static boolean carrying(){return live()!=null && carrying;}
+    public static boolean burning(){return live()!=null && burning;}
     public static boolean isCrouching(){return live()!=null && crouching;}
     public static boolean canUse(){return live()!=null && usable;}
 	/** The pose this frame renders with, taken once per frame so every hook agrees. Render thread only. */
@@ -56,9 +58,11 @@ public final class HostState {
 
 	/** {"t":"cam","f":frame,"p":[x,y,z],"r":[yaw,pitch,roll],"fov":deg,"fp":bool,"pl":[x,y,z],"h":bodyYaw} */
 	static void update(final JsonObject m) {
+        burning=m.has("burning") && m.get("burning").getAsBoolean();
         nativeUse=m.has("nativeuse") && m.get("nativeuse").getAsBoolean();
         visible=!m.has("visible") || m.get("visible").getAsBoolean();
-		usable=m.has("usable") && m.get("usable").getAsBoolean();
+		carrying=m.has("carrying") && m.get("carrying").getAsBoolean();
+        usable=m.has("usable") && m.get("usable").getAsBoolean();
         crouching=m.has("sneak") && m.get("sneak").getAsBoolean();
 		JsonArray p = m.getAsJsonArray("p");
 		JsonArray r = m.getAsJsonArray("r");

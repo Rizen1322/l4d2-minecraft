@@ -148,6 +148,11 @@ class CameraTests(unittest.TestCase):
 
 
 class SurfaceTests(unittest.TestCase):
+    def test_rough_floor_does_not_hover_one_voxel(self):
+        support=surface({'hit':[64,96,97.28], 'normal':[0,0,1]})
+        self.assertEqual(support['cell'],[2,3,-3])
+
+
     def test_non_grid_floor_keeps_whole_cube_above_surface(self):
         support = surface({'hit':[64,96,2864], 'normal':[0,0,1]})
         self.assertEqual(support['cell'], [2,90,-3])
@@ -221,3 +226,18 @@ class CollisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BodyCameraTests(unittest.TestCase):
+    def test_client_body_uses_camera_frame_and_rejects_auxiliary_body(self):
+        p={'p':[0,2,0],'pl':[0,0,0],'h':0,'fov':70}
+        a={'p':[0,2,1],'pl':[0,0,.7],'h':45,'fov':70}
+        self.assertEqual(render_camera(p,a)['pl'],[0,0,.7])
+        a['pl']=[0,0,1000]
+        self.assertEqual(render_camera(p,a)['pl'],p['pl'])
+
+class PickupOutboxTests(unittest.TestCase):
+    def test_pickup_survives_map_vm_and_rejects_unknown_items(self):
+        from bridge import PickupOutbox
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'pickups';p.write_text('pickup_1_2 bow\npickup_1_3 speed_potion\npickup_1_4 weapon_gascan\npickup_bad;quit tnt\n\x00')
+            self.assertEqual([v['item'] for v in PickupOutbox(p).read()],['bow','speed_potion'])

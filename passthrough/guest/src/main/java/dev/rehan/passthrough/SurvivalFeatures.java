@@ -19,6 +19,11 @@ import net.minecraft.world.level.GameType;
 public final class SurvivalFeatures {
     private static int ticks;
     private static long lastIgnition;
+    private static long burnUntil;
+    private static volatile boolean guestBurning;
+    public static boolean burning(){return guestBurning;}
+    public static void resetEnvironment(){burnUntil=0;guestBurning=false;lastIgnition=0;}
+    private static java.util.UUID burnPlayer;
     public static void register(){
         CommandRegistrationCallback.EVENT.register((dispatcher,access,environment)-> {
             var root=Commands.literal("l4d2mc");
@@ -76,6 +81,20 @@ public final class SurvivalFeatures {
         Passthrough.events.accept(String.format(java.util.Locale.ROOT,
             "{\"t\":\"protection\",\"e\":[%.2f,%.2f,%.2f,%.2f,%.2f],\"resistance\":%d,\"fireproof\":%b}",
             general,fire,blast,fall,projectile,resistance==null?0:Math.min(4,resistance.getAmplifier()+1),p.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE)));
+        var speed=p.getEffect(net.minecraft.world.effect.MobEffects.SPEED);
+        var slow=p.getEffect(net.minecraft.world.effect.MobEffects.SLOWNESS);
+        double factor=Math.clamp((1+(speed==null?0:.2*(speed.getAmplifier()+1)))*(1-(slow==null?0:.15*(slow.getAmplifier()+1))),.25,2);
+        boolean hazard=false;
+        for(var at:net.minecraft.core.BlockPos.betweenClosed(p.getBoundingBox().deflate(.05))) {
+            var state=p.level().getBlockState(at);
+            if(state.is(net.minecraft.tags.BlockTags.FIRE) || state.getFluidState().is(net.minecraft.tags.FluidTags.LAVA)){hazard=true;break;}
+        }
+        long now=System.nanoTime();
+        if(!p.getUUID().equals(burnPlayer)){burnPlayer=p.getUUID();burnUntil=0;}
+        if(hazard)burnUntil=now+4_000_000_000L;
+        if(p.isInWaterOrRain() || p.hasEffect(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE))burnUntil=0;
+        guestBurning=now<burnUntil;
+        Passthrough.events.accept(String.format(java.util.Locale.ROOT,"{\"t\":\"effects\",\"speed\":%.3f,\"burn\":%b}",factor,now<burnUntil));
         CampaignRewards.deliver(s,p);
         // Prevent independent Minecraft death/starvation; Source is authoritative.
         p.getAbilities().invulnerable=true;
@@ -116,6 +135,55 @@ public final class SurvivalFeatures {
             else for(var slot:new net.minecraft.world.entity.EquipmentSlot[]{net.minecraft.world.entity.EquipmentSlot.HEAD,net.minecraft.world.entity.EquipmentSlot.CHEST,net.minecraft.world.entity.EquipmentSlot.LEGS,net.minecraft.world.entity.EquipmentSlot.FEET})
                 p.getItemBySlot(slot).hurtAndBreak(Math.max(1,wear/4),p,slot);
         });
+    }
+    public static void shieldCooldown(int ticks){
+        var s=WorldBridge.server();if(s==null || ticks<1 || ticks>200)return;
+        s.execute(()->{if(!Passthrough.active || s.getPlayerList().getPlayers().isEmpty())return;
+            var p=s.getPlayerList().getPlayers().getFirst();
+            p.getCooldowns().addCooldown(new ItemStack(Items.SHIELD),ticks);p.stopUsingItem();
+        });
+    }
+    public static ItemStack pickupStack(String kind){
+        return switch(kind){
+                case "golden_apple"->new ItemStack(Items.GOLDEN_APPLE);
+                case "cookie"->new ItemStack(Items.COOKIE);
+                case "wooden_sword"->new ItemStack(Items.WOODEN_SWORD);
+                case "stone_sword"->new ItemStack(Items.STONE_SWORD);
+                case "iron_sword"->new ItemStack(Items.IRON_SWORD);
+                case "diamond_sword"->new ItemStack(Items.DIAMOND_SWORD);
+                case "netherite_sword"->new ItemStack(Items.NETHERITE_SWORD);
+                case "bow"->new ItemStack(Items.BOW);
+                case "crossbow"->new ItemStack(Items.CROSSBOW);
+                case "flint_and_steel"->new ItemStack(Items.FLINT_AND_STEEL);
+                case "tnt"->new ItemStack(Items.TNT);
+                case "totem_of_undying"->new ItemStack(Items.TOTEM_OF_UNDYING);
+                case "speed_potion","slowness_potion"->{
+                    var potion=new ItemStack(kind.equals("speed_potion")?Items.POTION:Items.SPLASH_POTION);
+                    potion.set(net.minecraft.core.component.DataComponents.POTION_CONTENTS,
+                        new net.minecraft.world.item.alchemy.PotionContents(kind.equals("speed_potion")?net.minecraft.world.item.alchemy.Potions.SWIFTNESS:net.minecraft.world.item.alchemy.Potions.SLOWNESS));
+                    yield potion;
+                }
+                default->ItemStack.EMPTY;
+        };
+    }
+    private static final java.util.Set<String> pendingPickups=new java.util.HashSet<>();
+    public static void pickup(String kind,String key){
+        MinecraftServer s=WorldBridge.server();if(s==null || !key.matches("pickup_[A-Za-z0-9_]{1,112}"))return;
+        synchronized(pendingPickups){if(!pendingPickups.add(key))return;}
+        s.execute(()->{try{
+            if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
+            ServerPlayer p=s.getPlayerList().getPlayers().getFirst();var account=((RewardAccount)p).l4d2mc$rewards();if(account==null)return;
+            if(!account.pickups.contains(key)){
+                var grant=PickupPolicy.items(kind);if(grant.isEmpty())return;
+                if(account.reserve.size()+grant.keySet().stream().filter(item->!account.reserve.containsKey(item)).count()>32)return;
+                for(var e:grant.entrySet())if(account.reserve.getOrDefault(e.getKey(),0)+e.getValue()>10000)return;
+                grant.forEach((item,count)->account.reserve.merge(item,count,Integer::sum));
+                if(account.pickups.size()>=512)account.pickups.remove(account.pickups.iterator().next());
+                account.pickups.add(key);
+            }
+            CampaignRewards.deliver(s,p);
+            if(CampaignRewards.checkpoint(s,p,key))Passthrough.events.accept("{\"t\":\"pickupack\",\"key\":\""+key+"\"}");
+        }finally{synchronized(pendingPickups){pendingPickups.remove(key);}}});
     }
     public static void supply(double x,double y,double z,int kind){
         MinecraftServer s=WorldBridge.server();if(s==null || kind<0 || kind>3 || !Double.isFinite(x+y+z))return;
