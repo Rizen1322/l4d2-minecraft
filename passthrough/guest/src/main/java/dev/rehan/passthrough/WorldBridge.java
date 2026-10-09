@@ -33,7 +33,9 @@ public final class WorldBridge {
 	/** While placing or removing the host's own ground: those changes aren't news to the host (server thread only). */
 	private static boolean placingGround;
 
-	public static void clearTransient(){changes.clear();barricadeDamage.clear();}
+	public static void serverWork(MinecraftServer s,Runnable action){ServerDispatchPolicy.run(s.isSameThread(),s::execute,action);}
+
+    public static void clearTransient(){changes.clear();barricadeDamage.clear();}
 
     private WorldBridge() {
 	}
@@ -53,7 +55,7 @@ public final class WorldBridge {
 		return server != null;
 	}
 
-	static MinecraftServer server() {
+	public static MinecraftServer server() {
 		return server;
 	}
 
@@ -64,7 +66,7 @@ public final class WorldBridge {
 			return;
 		}
 
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
 			ServerLevel level = s.overworld();
 			BlockState barrier = Blocks.BARRIER.defaultBlockState();
 			BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -90,7 +92,7 @@ public final class WorldBridge {
 			return;
 		}
 
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
 			ServerLevel level = s.overworld();
 			placingGround = true;
 			for (BlockPos pos : barriers) {
@@ -155,7 +157,7 @@ public final class WorldBridge {
 			return;
 		}
 
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
 			Passthrough.LOG.info("command: {}", command);
 			s.getCommands().performPrefixedCommand(s.createCommandSourceStack(), command);
 		});
@@ -230,7 +232,7 @@ public final class WorldBridge {
 			return;
 		}
 
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
 			ServerLevel level = s.overworld();
 			Entity e = level.getEntity(id);
 			if (e instanceof ThrownEnderpearl) {
@@ -303,7 +305,7 @@ public final class WorldBridge {
 		}
 
         long scene=MapBuilds.scene();
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
             if(!MapBuilds.ready || scene!=MapBuilds.scene())return;
 			ServerLevel level = s.overworld();
 			ServerPlayer player = s.getPlayerList().getPlayers().isEmpty() ? null : s.getPlayerList().getPlayers().get(0);
@@ -343,7 +345,7 @@ public final class WorldBridge {
         if(values.size()!=3 || !Double.isFinite(damage) || damage<=0 || damage>80)return;
         int x=values.get(0).getAsInt(),y=values.get(1).getAsInt(),z=values.get(2).getAsInt();
         MinecraftServer s=server;if(s==null || Math.abs(x)>1023 || Math.abs(z)>1023)return;
-        s.execute(()->{BlockPos p=new BlockPos(x,y,z);ServerLevel level=s.overworld();
+        WorldBridge.serverWork(s,()->{BlockPos p=new BlockPos(x,y,z);ServerLevel level=s.overworld();
             if(!Passthrough.active || !MapBuilds.ready || !level.isLoaded(p))return;
             BlockState state=level.getBlockState(p);float hardness=state.getDestroySpeed(level,p);
             if(state.isAir() || state.is(Blocks.BARRIER) || hardness<0){barricadeDamage.remove(p);return;}
@@ -361,7 +363,7 @@ public final class WorldBridge {
 			return;
 		}
 
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
 			if (s.getPlayerList().getPlayers().isEmpty()) {
 				return;
 			}

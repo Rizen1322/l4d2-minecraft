@@ -59,7 +59,7 @@ public final class HostNavigation {
             for(int k=0;k<3;k++){double v=row.get(k).getAsDouble();if(!Double.isFinite(v) || Math.abs(v)>1023)return;points[i][k]=v;}
         }
         var server=WorldBridge.server();if(server==null)return;
-        server.execute(()->{State s=states.get(id);if(s==null || s.query!=q || s.entity.isRemoved() || !Passthrough.active)return;
+        WorldBridge.serverWork(server,()->{State s=states.get(id);if(s==null || s.query!=q || s.entity.isRemoved() || !Passthrough.active)return;
             s.cursor=new NavCursor(points);s.received=System.nanoTime();s.los=los;
             s.origin=new Vec3(op[0],op[1],op[2]);s.visibleGoal=new Vec3(gp[0],gp[1],gp[2]);
         });

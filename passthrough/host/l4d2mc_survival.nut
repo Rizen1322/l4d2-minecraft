@@ -175,6 +175,11 @@ L4D2MCBridge.SurvivalCleanup <- function() {
     foreach(id,v in survival.golems)if(v.entity.IsValid())v.entity.Kill();survival.golems.clear();
     survival.shieldCharge=6;survival.shieldCooldown=0;survival.shieldHitAt.clear();survival.guestBurn=false;survival.effectsAt=-100.0;
     survival.blocking=false;survival.protectionAt=-100.0;survival.shieldHits.clear();survival.aggroHits.clear();
+    survival.meal=0.0;survival.nextMeal=0.0;survival.nextBurn=0.0;
+    survival.nextShield=0.0;survival.nextIgnite=0.0;survival.nextAggro=0.0;
+    survival.nextPressure=0.0;survival.pressureIndex=0;
+    if("swordAt" in survival)delete survival.swordAt;
+    if("dropLatch" in survival)survival.dropLatch=false;
 };
 // Eight non-solid invisible targets, not collision stand-ins. Native infected navigation pursues them.
 L4D2MCBridge.GolemTarget <- function(f,player) {
@@ -327,7 +332,12 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
             if("L4D2MCBridge" in getroottable())L4D2MCBridge.ChapterReward(true);
         },
         OnGameEvent_round_start=function(event) {
-            if("L4D2MCBridge" in getroottable()){L4D2MCBridge.epoch=RandomInt(1,2000000000);L4D2MCBridge.SurvivalCleanup();}
+            if("L4D2MCBridge" in getroottable()) {
+                local b=L4D2MCBridge;b.epoch=RandomInt(1,2000000000);b.SurvivalCleanup();
+                b.survival.links.clear();
+                b.ClearCollision();b.collisionSequence="";
+                b.gameplay.content=null;b.gameplay.armed=false;b.gameplay.replies.clear();
+            }
         },
         OnGameEvent_tongue_grab=function(event) {
             if(!("L4D2MCBridge" in getroottable()) || !("victim" in event) || !("userid" in event))return;

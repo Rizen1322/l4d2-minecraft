@@ -90,3 +90,24 @@ tasks.register('verifyFramePublishPolicy', JavaExec) {
     mainClass = 'dev.rehan.passthrough.FramePublishPolicyTest'
 }
 check.dependsOn verifyFramePublishPolicy
+
+tasks.register('verifyEquipmentWearPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.EquipmentWearPolicyTest'
+}
+check.dependsOn verifyEquipmentWearPolicy
+
+tasks.register('verifyReplyTracker', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.ReplyTrackerTest'
+}
+check.dependsOn verifyReplyTracker
+
+tasks.register('verifyServerDispatchPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.ServerDispatchPolicyTest'
+}
+check.dependsOn verifyServerDispatchPolicy

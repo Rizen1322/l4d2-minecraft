@@ -106,7 +106,7 @@ public final class SurvivalFeatures {
         boolean incap=values.get(3).getAsBoolean();
         if(!Double.isFinite(hp+temporary+maximum) || maximum<=0 || maximum>1000 || hp<0 || hp>1000 || temporary<0 || temporary>1000)return;
         MinecraftServer s=WorldBridge.server();if(s==null)return;
-        s.execute(()->{if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
+        WorldBridge.serverWork(s,()->{if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
             ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
             p.setHealth(GuestMessages.health(hp,maximum,incap));
             p.setAbsorptionAmount(incap?0:(float)Math.clamp(temporary/maximum*20,0,20));
@@ -114,7 +114,7 @@ public final class SurvivalFeatures {
     }
     public static void igniteSurface(double x,double y,double z){
         MinecraftServer s=WorldBridge.server();if(s==null || !Double.isFinite(x+y+z))return;
-        s.execute(()->{
+        WorldBridge.serverWork(s,()->{
             if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
             ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
             if(p.distanceToSqr(x,y,z)>36 || System.nanoTime()-lastIgnition<350_000_000L)return;
@@ -127,18 +127,23 @@ public final class SurvivalFeatures {
     }
     public static void equipmentHit(int amount,boolean shield){
         MinecraftServer s=WorldBridge.server();if(s==null || amount<0 || amount>100)return;
-        s.execute(()->{var players=s.getPlayerList().getPlayers();if(players.isEmpty() || !Passthrough.active)return;
+        WorldBridge.serverWork(s,()->{var players=s.getPlayerList().getPlayers();if(players.isEmpty() || !Passthrough.active)return;
             ServerPlayer p=players.getFirst();
             if(p.isCreative())return;
             int wear=Math.max(1,(int)Math.ceil(amount/5.0));
-            if(shield && p.getUseItem().is(Items.SHIELD))p.getUseItem().hurtAndBreak(wear,p,p.getUsedItemHand());
-            else for(var slot:new net.minecraft.world.entity.EquipmentSlot[]{net.minecraft.world.entity.EquipmentSlot.HEAD,net.minecraft.world.entity.EquipmentSlot.CHEST,net.minecraft.world.entity.EquipmentSlot.LEGS,net.minecraft.world.entity.EquipmentSlot.FEET})
-                p.getItemBySlot(slot).hurtAndBreak(Math.max(1,wear/4),p,slot);
+            EquipmentWearPolicy.apply(shield,p.getUseItem(),p.getMainHandItem(),p.getOffhandItem(),
+                stack->stack.is(Items.SHIELD),stack->{
+                    var hand=stack==p.getOffhandItem()?InteractionHand.OFF_HAND:InteractionHand.MAIN_HAND;
+                    stack.hurtAndBreak(wear,p,hand);
+                },()->{
+                    for(var slot:new net.minecraft.world.entity.EquipmentSlot[]{net.minecraft.world.entity.EquipmentSlot.HEAD,net.minecraft.world.entity.EquipmentSlot.CHEST,net.minecraft.world.entity.EquipmentSlot.LEGS,net.minecraft.world.entity.EquipmentSlot.FEET})
+                        p.getItemBySlot(slot).hurtAndBreak(Math.max(1,wear/4),p,slot);
+                });
         });
     }
     public static void shieldCooldown(int ticks){
         var s=WorldBridge.server();if(s==null || ticks<1 || ticks>200)return;
-        s.execute(()->{if(!Passthrough.active || s.getPlayerList().getPlayers().isEmpty())return;
+        WorldBridge.serverWork(s,()->{if(!Passthrough.active || s.getPlayerList().getPlayers().isEmpty())return;
             var p=s.getPlayerList().getPlayers().getFirst();
             p.getCooldowns().addCooldown(new ItemStack(Items.SHIELD),ticks);p.stopUsingItem();
         });
@@ -170,7 +175,7 @@ public final class SurvivalFeatures {
     public static void pickup(String kind,String key){
         MinecraftServer s=WorldBridge.server();if(s==null || !key.matches("pickup_[A-Za-z0-9_]{1,112}"))return;
         synchronized(pendingPickups){if(!pendingPickups.add(key))return;}
-        s.execute(()->{try{
+        WorldBridge.serverWork(s,()->{try{
             if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
             ServerPlayer p=s.getPlayerList().getPlayers().getFirst();var account=((RewardAccount)p).l4d2mc$rewards();if(account==null)return;
             if(!account.pickups.contains(key)){
@@ -187,7 +192,7 @@ public final class SurvivalFeatures {
     }
     public static void supply(double x,double y,double z,int kind){
         MinecraftServer s=WorldBridge.server();if(s==null || kind<0 || kind>3 || !Double.isFinite(x+y+z))return;
-        s.execute(()->{var players=s.getPlayerList().getPlayers();if(players.isEmpty() || !Passthrough.active || !MapBuilds.ready)return;
+        WorldBridge.serverWork(s,()->{var players=s.getPlayerList().getPlayers();if(players.isEmpty() || !Passthrough.active || !MapBuilds.ready)return;
             ServerPlayer p=players.getFirst();if(p.distanceToSqr(x,y,z)>64*64)return;
             var item=switch(kind){case 0->Items.BREAD;case 1->Items.COBBLESTONE;case 2->Items.IRON_NUGGET;default->Items.ARROW;};
             ItemEntity drop=new ItemEntity(s.overworld(),x,y,z,new ItemStack(item,kind==1?4:1));drop.setDefaultPickUpDelay();s.overworld().addFreshEntity(drop);

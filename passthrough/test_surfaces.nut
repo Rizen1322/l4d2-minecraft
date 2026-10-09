@@ -16,6 +16,11 @@ dofile("passthrough/host/l4d2mc_gameplay.nut");
 dofile("passthrough/host/l4d2mc_survival.nut");
 dofile("passthrough/host/l4d2mc_navigation.nut");
 local b=L4D2MCBridge;
+if(b.CompleteMailbox(["3 map 7","1 2 3"],"3"))throw "Partial collision file accepted";
+if(!b.CompleteMailbox(["3 map 7","1 2 3","4 5 6","end 3 2"],"3"))throw "Complete file rejected";
+if(b.CompleteMailbox(["3 map 7","1 2 3","end 3 2"],"3"))throw "Wrong row count accepted";
+if(b.CompleteMailbox(["3 map 7","1 2 3","end 2 1"],"3"))throw "Old footer accepted";
+
 if(!b.WalkableFloor({hit=true,pos=Vec(0,0,0)},null))throw "Retail trace without normal rejected";
 class Area {
     id=0;east=null;constructor(i){id=i;}
@@ -43,6 +48,19 @@ b.survival.shieldHitAt.clear();
 class Special extends Enemy {function GetClassname(){return "player";}}
 for(local i=0;i<3;i++)if(!b.ShieldSpend(Special(i+20)))throw "Special capacity too small";
 if(b.ShieldAvailable())throw "Three special attacks must exhaust shield";
+b.survival.meal=32;b.survival.nextMeal=999;b.survival.nextIgnite=999;
+b.survival.nextBurn=999;b.survival.nextShield=999;b.survival.nextAggro=999;
+b.survival.links["1 2 3"]<-{entity=null};
+b.SurvivalCleanup();
+if(b.survival.meal!=0 || b.survival.nextMeal!=0 || b.survival.nextIgnite!=0
+    || b.survival.nextBurn!=0 || b.survival.nextShield!=0 || b.survival.nextAggro!=0
+    )throw "Prior-round heal/timers survived cleanup";
+if(b.survival.links.len()!=1)throw "Temporary disconnect lost door link";
+local collisionCleared=false;b.ClearCollision<-function(){collisionCleared=true;};b.epoch<-1;
+b.collisionSequence<-"old";b.gameplay.content="old";b.gameplay.armed=true;b.gameplay.replies[5]<-"old";
+L4D2MCSurvivalEvents.OnGameEvent_round_start({});
+if(!collisionCleared || b.collisionSequence!="" || b.gameplay.content!=null || b.gameplay.armed
+    || b.gameplay.replies.len()!=0 || b.survival.links.len()!=0)throw "Prior-round collision/replies/door links survived round_start";
 local hits=[];
 class Target {
     id=0;kind="";pos=null;friendly=false;

@@ -62,7 +62,7 @@ public final class HostTerrain {
         clientCopy.entrySet().removeIf(entry->received-entry.getValue().at>1_000_000_000L);
         for(double[] v:copy)clientCopy.put((int)v[0],new Support(null,v[1],v[2],v[3]==1,v[4],v[5],v[6],v[7],v[8],java.util.Arrays.copyOfRange(v,9,13),received));
         clientSupports=Map.copyOf(clientCopy);
-        current.execute(()->{
+        WorldBridge.serverWork(current,()->{
             if(server!=current || !Passthrough.active)return;
             ServerLevel level=current.overworld();
             for(double[] v:copy){
@@ -81,7 +81,7 @@ public final class HostTerrain {
 
     public static void recover(int id,double x,double y,double z){
         MinecraftServer current=server;if(current==null || !Double.isFinite(x+y+z))return;
-        current.execute(()->{var e=current.overworld().getEntity(id);
+        WorldBridge.serverWork(current,()->{var e=current.overworld().getEntity(id);
             if(!(e instanceof Mob) || !Passthrough.active || e.distanceToSqr(x,y,z)>64)return;
             e.setPos(x,y,z);e.setDeltaMovement(0,0,0);supports.remove(id);
             if(e instanceof Mob m)HostNavigation.stuck(m);

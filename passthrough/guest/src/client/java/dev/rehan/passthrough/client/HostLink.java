@@ -88,10 +88,42 @@ public final class HostLink extends WebSocketServer {
 		try {
 			JsonObject m = JsonParser.parseString(message).getAsJsonObject();
             if(!m.get("t").getAsString().equals("attach") && conn!=this.controller)return;
-            if(m.has("rid") && !m.get("t").getAsString().equals("pickup"))synchronized(delivered) {
-                int rid=m.get("rid").getAsInt();if(!delivered.add(rid))return;
-                if(delivered.size()>256)delivered.remove(delivered.iterator().next());
+            String type=m.get("t").getAsString();
+            if(SOURCE_TASKS.contains(type)) {
+                queueSource(conn,m);return;
             }
+            dispatch(conn,m);
+
+		} catch (RuntimeException e) {
+			Passthrough.LOG.warn("bad host message {}: {}", message.length() > 200 ? message.substring(0, 200) : message, e.toString());
+		}
+	}
+
+    private static final java.util.Set<String> SOURCE_TASKS=java.util.Set.of(
+        "hosthealth","peds","physground","projhit","equipmenthit","shieldcooldown","breakblock",
+        "mobdmg","mobpos","navpath","supply","blocksync");
+    private final dev.rehan.passthrough.ReplyTracker replies=new dev.rehan.passthrough.ReplyTracker();
+    private void ackReply(int rid){Passthrough.events.accept("{\"t\":\"replyack\",\"id\":"+rid+"}");}
+    private void queueSource(WebSocket conn,JsonObject m){
+        if(!m.has("scene"))return;
+        long scene=m.get("scene").getAsLong(),generation=controllerGeneration;
+        int rid=m.has("rid")?m.get("rid").getAsInt():0;
+        if(rid<0)return;
+        var server=WorldBridge.server();if(server==null || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
+        if(rid>0){
+            var status=replies.begin(scene,generation,rid);
+            if(status==dev.rehan.passthrough.ReplyTracker.Status.DONE){ackReply(rid);return;}
+            if(status==dev.rehan.passthrough.ReplyTracker.Status.PENDING)return;
+        }
+        server.execute(()->{boolean success=false;try{
+            if(conn!=controller || generation!=controllerGeneration || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
+            dispatch(conn,m);
+            success=true;
+            if(rid>0)ackReply(rid);
+        }catch(RuntimeException error){Passthrough.LOG.warn("Source reply not applied; retained for retry",error);}
+        finally{if(rid>0)replies.finish(scene,generation,rid,success);}});
+    }
+    private void dispatch(WebSocket conn,JsonObject m){
 			switch (m.get("t").getAsString()) {
                 case "attach" -> {
                     final long generation;
@@ -100,7 +132,7 @@ public final class HostLink extends WebSocketServer {
                         if(previous!=null && previous!=conn && previous.isOpen()) {
                             conn.close(1008,"another host already owns the guest");return;
                         }
-                        controller=conn;generation=++controllerGeneration;
+                        controller=conn;generation=++controllerGeneration;replies.newOwner();
                     }
                     Minecraft minecraft=Minecraft.getInstance();
                     minecraft.execute(()->{if(controller==conn && controllerGeneration==generation)ClientInput.releaseRelay(minecraft);});
@@ -112,7 +144,7 @@ public final class HostLink extends WebSocketServer {
                 case "ground" -> {} // Retired: Source supports are virtual, never world blocks.
 				case "clear" -> WorldBridge.clearSolid();
 				case "cmd" -> WorldBridge.command(m.get("c").getAsString());
-				case "gta", "gtastate", "gtainfo", "director" -> this.relay(conn, message);
+				case "gta", "gtastate", "gtainfo", "director" -> this.relay(conn, m.toString());
 				case "blocksync" -> WorldBridge.sync(Math.clamp(m.has("r") ? m.get("r").getAsInt() : 16,1,32), m.has("id") ? m.get("id").getAsLong() : 0L);
 				case "projhit" -> {
 					JsonArray at = m.getAsJsonArray("pos");
@@ -163,10 +195,7 @@ public final class HostLink extends WebSocketServer {
 					minecraft.execute(() -> {if(controller==conn)ClientInput.handle(minecraft, m);});
 				}
 			}
-		} catch (RuntimeException e) {
-			Passthrough.LOG.warn("bad host message {}: {}", message.length() > 200 ? message.substring(0, 200) : message, e.toString());
-		}
-	}
+    }
 
 	/** Messages between the host plugin and a director script pass through Minecraft's link to every other client. */
 	private void relay(final WebSocket from, final String message) {

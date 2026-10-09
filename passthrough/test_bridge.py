@@ -181,7 +181,7 @@ class CollisionTests(unittest.TestCase):
             snapshot.apply({'t':'blocks','clear':[0,90,-176]})
             snapshot.publish('c1m1_hotel', [0,90,-176])
             lines = snapshot.path.read_text().splitlines()
-            self.assertEqual(len(lines),513)
+            self.assertEqual(len(lines),514)
             self.assertEqual(lines[1], '1 90 -176')
             self.assertNotIn('0 90 -176',lines[1:])
 
@@ -201,7 +201,7 @@ class CollisionTests(unittest.TestCase):
             snapshot.apply({'t':'blocks','set':[1,90,-176]})
             snapshot.publish('c1m1_hotel',[0,90,0])
             snapshot.publish('c1m2_streets',[0,90,0])
-            self.assertEqual(len(snapshot.path.read_text().splitlines()),1)
+            self.assertEqual(len(snapshot.path.read_text().splitlines()),2)
 
     def test_bad_cells_and_map_names_never_become_script(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -220,7 +220,7 @@ class CollisionTests(unittest.TestCase):
                 snapshot.apply({'t':'blocks','set':[2,90,-176,'invalid',0,0]})
             self.assertEqual(snapshot.cells,{(1,90,-176)})
             snapshot.publish('c1m1_hotel',[0,90,0],active=False)
-            self.assertEqual(len(snapshot.path.read_text().splitlines()),1)
+            self.assertEqual(len(snapshot.path.read_text().splitlines()),2)
             self.assertEqual(snapshot.cells,{(1,90,-176)})
 
 
@@ -267,3 +267,12 @@ class ScopedGameplayTests(unittest.TestCase):
             self.assertTrue(accepts_scene({'t':kind,'scene':2},2))
         self.assertTrue(accepts_scene({'t':'pickupack','key':'pickup_1_2'},2))
         self.assertTrue(accepts_scene({'t':'rewardack','key':'c1m1_hotel_1'},2))
+
+class FramedCollisionTests(unittest.TestCase):
+    def test_epoch_and_final_record_count_identify_complete_snapshot(self):
+        with tempfile.TemporaryDirectory() as d:
+            c=CollisionSnapshot(Path(d)/'collision');c.epoch=17
+            c.apply({'t':'blocks','set':[1,2,3,4,5,6]});c.publish('c1m1_hotel',[0,0,0])
+            rows=c.path.read_text().splitlines();header=rows[0].split();footer=rows[-1].split()
+            self.assertEqual(header[2],'17')
+            self.assertEqual(footer,['end',header[0],str(len(rows)-2)])

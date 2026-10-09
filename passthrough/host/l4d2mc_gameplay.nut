@@ -16,6 +16,13 @@ L4D2MCBridge.Integer <- function(token) {
     for(local i=0;i<token.len();i++)if(token[i]<48 || token[i]>57)throw "invalid integer token";
     local n=token.tointeger();if(n<0)throw "integer overflow";return n;
 };
+// A streamed file prefix is never an authoritative snapshot.
+L4D2MCBridge.CompleteMailbox <- function(lines,identity) {
+    if(lines.len()<2)return false;
+    local footer=split(lines.top()," ");
+    if(footer.len()!=3 || footer[0]!="end" || footer[1]!=identity)return false;
+    try{return Integer(footer[2])==lines.len()-2;}catch(error){return false;}
+};
 L4D2MCBridge.Hide <- function(e) {
     if(e==null || !e.IsValid() || !NetProps.HasProp(e,"m_fEffects"))return;
     local id=e.GetEntityIndex(),flags=NetProps.GetPropInt(e,"m_fEffects");
@@ -459,8 +466,8 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     if(text==null || text.len()>18000)return GameplayLease();
     local lines=split(text,"\r\n");if(lines.len()<1 || lines.len()>256)return GameplayLease();
     local header=split(lines[0]," ");
-    if(header.len()!=6 && header.len()!=8)return GameplayLease();
-    if(header[1]!=Director.GetMapName() || header[2]!="1")return false;
+    if(header.len()!=9 || !CompleteMailbox(lines,header[3]))return GameplayLease();
+    if(header[1]!=Director.GetMapName() || header[8]!=epoch.tostring() || header[2]!="1")return false;
     if(header[0]!=gameplay.generation) {
         gameplay.generation=header[0];gameplay.lastEvent=0;gameplay.projectiles.clear();gameplay.replies.clear();gameplay.armed=false;gameplay.content=null;
     }
@@ -476,7 +483,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     if(text!=gameplay.content){gameplay.content=text;gameplay.at=Time();gameplay.armed=true;}
     if(!gameplay.armed)return false;
     if(Time()-gameplay.at>0.5)return false;
-    for(local i=1;i<lines.len();i++) {
+    for(local i=1;i<lines.len()-1;i++) {
         local f=split(lines[i]," ");
         if(f.len()>0 && f[0]=="event")try{Event(f,player);}catch(error){printl("[L4D2MC EVENT] "+error);}
         else if(f.len()>0 && f[0]=="golem")try{GolemTarget(f,player);}catch(error){printl("[L4D2MC GOLEM] "+error);}
@@ -488,7 +495,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
         else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
         else if(f.len()>0 && f[0]=="physics")try{Physics(f,player);}catch(error){printl("[L4D2MC PHYSICS] "+error);}
     }
-    HeldActions(player,header.len()==8 && header[6]=="1",header.len()==8 && header[7]=="1",header[4]=="1");
+    HeldActions(player,header.len()==9 && header[6]=="1",header.len()==9 && header[7]=="1",header[4]=="1");
     Hide(player);
     Movement(player,header[4]=="1",header[5]=="1");
     GroundPhysics();

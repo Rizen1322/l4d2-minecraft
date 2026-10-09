@@ -412,3 +412,43 @@ native x86 PE и полная сборка проходят. Семь компо
 проверены. Агент повторно проверил startup/reconnect/map-change поток и не нашёл
 блокирующих ошибок. Игры не запускались; визуальное поведение GPU и игровых
 коллизий остаётся непроверенным в настоящей сессии.
+
+
+## Аудит логики и канала связи — 09.10.2026
+
+Два агента независимо проверили gameplay и транспорт без запуска игр.
+Исправлены: shieldcooldown прекращал use раньше equipmenthit, отчего последний
+block изнашивал броню; EquipmentWearPolicy теперь ищет удерживаемый щит и не
+переключается на armor при shield receipt. Голем больше не получает случайного
+союзника как source damage: nearestProxy фильтруется targetFor. Cleanup очищает
+накопленное лечение/временные таймеры; round_start очищает door links, colliders,
+старые replies и activation baseline. Тотем из defib остаётся предметом без
+воскрешения Source — эта известная недоработка пока не реализована.
+
+Collision/gameplay файлы теперь имеют обязательный footer с identity/count и
+round epoch в header. Реальный Source parser протестирован на torn prefix:
+A+B -> частичная новая запись A не принимается -> полный файл той же sequence
+A+B принимается. Старый epoch также отвергается. Это предотвращает временное
+исчезновение collision и возврат объектов прошлого раунда.
+
+Python больше не подтверждает Source reply после socket.send. HostLink ставит
+контекстную задачу на Minecraft server, проверяет scene/owner generation при
+выполнении и подтверждает завершённый handler. ReplyTracker сохраняет retry после
+исключения, предотвращает дубль после reconnect и не позволяет старому владельцу
+снять pending нового. ACK означает завершённый dispatch: штатный no-op, когда
+объект уже отсутствует, тоже может быть подтверждён. Durable pickups/rewards
+по-прежнему требуют player.dat checkpoint.
+
+По проверенному байткоду 26.3 ReentrantBlockableEventLoop повторно ставит execute
+в очередь даже внутри running server task. WorldBridge.serverWork поэтому
+выполняет action непосредственно на серверном потоке и планирует только с чужого
+потока. Это удерживает конечное применение wear/cooldown/physics/HP в рамках
+scene/owner guard до ACK. Mob damage также применяется непосредственно; staged
+peds/damage очищаются синхронно при reset. Host->guest transient сообщения теперь
+также несут scene. Обратный аудит не нашёл блокеров в проверенных нормальных путях.
+
+Offline проверки: 56 Python, 9 JVM programs, 3 standalone Source suites, syntax
+всех VScript, native x86 PE и PowerShell. Проверяющий Source runner усилен:
+standalone sq.exe способен вернуть exit0 при VM exception; теперь проверяются
+error marker и обязательный success sentinel. Намеренный throw подтвердил это
+поведение; игры не открывались. Семь компонентов обновлены через owned installer.

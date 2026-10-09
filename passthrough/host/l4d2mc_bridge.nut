@@ -38,11 +38,11 @@ L4D2MCBridge.SyncCollision <- function() {
     local text = FileToString("l4d2mc_collision.txt");
     if (text == null || text.len() > 32768) return;
     local lines = split(text, "\n\r");
-    if (lines.len() < 1 || lines.len() > 513) return;
+    if (lines.len() < 1 || lines.len() > 514) return;
     local header = split(lines[0], " ");
-    if (header.len() != 2 || header[1] != Director.GetMapName() || header[0] == collisionSequence) return;
+    if (header.len() != 3 || header[2]!=epoch.tostring() || !CompleteMailbox(lines,header[0]) || header[1] != Director.GetMapName() || header[0] == collisionSequence) return;
     local wanted = {};
-    foreach (line in lines.slice(1)) {
+    foreach (line in lines.slice(1,lines.len()-1)) {
         local fields = split(line, " ");
         if (fields.len() != 3) return;
         local values = [];

@@ -15,7 +15,7 @@ def source_position(values):
 class GameplayMailbox:
     def __init__(self,path):
         self.path=path;self.generation=uuid.uuid4().hex[:12]
-        self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
+        self.epoch=0;self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
         self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={};self.protection=None;self.protection_at=0;self.effects=None;self.effects_at=0
 
     def apply(self,message):
@@ -123,7 +123,7 @@ class GameplayMailbox:
         if self.map is not None and self.map!=map_name:
             self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[];self.navigation.clear();self.protection=None;self.effects=None
         self.map=map_name
-        records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)}']
+        records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)} {self.epoch}']
         if active:
             records+=[' '.join(map(str,('golem',*row))) for row in self.mobs if row[1] in ('iron_golem','snow_golem')][:8]
             records+=[' '.join(map(str,('nav',*row))) for row,at in self.navigation.values() if time.monotonic()-at<1.5]
@@ -138,6 +138,7 @@ class GameplayMailbox:
             records+=[' '.join(map(str,('event',*e))) for e in self.events]
             records+=[' '.join(map(str,('projectile',*e))) for e in self.projectiles]
             records+=[' '.join(map(str,('physics',*e))) for e in self.physics]
+        records.append(f'end {records[0].split()[3]} {len(records)-1}')
         text='\n'.join(records)
         if len(text)>18000:raise ValueError('mailbox too large')
         self.path.write_text(text,encoding='ascii')

@@ -214,7 +214,7 @@ class CollisionSnapshot:
     """Bounded, data-only reverse channel. Never emits executable Squirrel."""
     def __init__(self, path):
         self.path, self.cells, self.sequence, self.map = path, set(), 0, None
-        self.scene = None
+        self.scene = None;self.epoch=0
 
     def apply(self, message):
         if message.get('t') != 'blocks' or (self.scene is not None and message.get('scene') != self.scene):
@@ -250,7 +250,8 @@ class CollisionSnapshot:
         # Bound host props independently of the cache; Source also checks its free edicts.
         rows = sorted(self.cells, key=lambda c: sum((c[i]+0.5-centre[i])**2 for i in range(3)))[:512] if active else []
         self.sequence += 1
-        data = [f'{self.sequence} {map_name}'] + ['%d %d %d' % c for c in rows]
+        data = [f'{self.sequence} {map_name} {self.epoch}'] + ['%d %d %d' % c for c in rows]
+        data.append(f'end {self.sequence} {len(rows)}')
         self.path.write_text('\n'.join(data), encoding='ascii')
 
 
@@ -548,7 +549,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                             session=(sample['map'],sample.get('epoch',0))
                             if guest_map != session:
                                 guest_map=session;map_ready=False
-                                collision.cells.clear();collision.scene=scene_token(*session)
+                                collision.cells.clear();collision.scene=scene_token(*session);collision.epoch=session[1];gameplay.epoch=session[1]
                                 gameplay.effects=None
                                 sync_after=None;next_sync=0.0;synced=False;sync_id=time.monotonic_ns()
                                 gameplay.events.clear();gameplay.mobs.clear();gameplay.physics.clear();gameplay.projectiles.clear()
@@ -577,20 +578,20 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                     collision.publish(sample['map'], pose['p'], active=map_ready and frames.fresh(3.0))
                                     last_collision = time.monotonic()
                                 if sync_after is not None and frames.fresh() and time.monotonic() >= max(sync_after,next_sync):
-                                    await socket.send(json.dumps({'t':'blocksync','r':16,'id':sync_id}))
+                                    await socket.send(json.dumps({'t':'blocksync','r':16,'id':sync_id,'scene':collision.scene}))
                                     next_sync = time.monotonic()+2
                                 pose_surface = surface(sample)
-                                await socket.send(json.dumps({'t':'surface','hit':pose_surface}))
+                                await socket.send(json.dumps({'t':'surface','hit':pose_surface,'scene':collision.scene}))
                                 if 'health' in sample:
-                                    await socket.send(json.dumps({'t':'hosthealth','h':sample['health']}))
+                                    await socket.send(json.dumps({'t':'hosthealth','h':sample['health'],'scene':collision.scene}))
                                 if 'actors' in sample:
-                                    await socket.send(json.dumps({'t':'peds','p':sample['actors']}))
+                                    await socket.send(json.dumps({'t':'peds','p':sample['actors'],'scene':collision.scene}))
                                 if sample.get('physground'):
-                                    await socket.send(json.dumps({'t':'physground','p':sample['physground']}))
+                                    await socket.send(json.dumps({'t':'physground','p':sample['physground'],'scene':collision.scene}))
                                 if sample['f']!=last_reply_frame:
                                     for reply in sample.get('replies',[])[:64]:
-                                        await socket.send(json.dumps(reply))
-                                        if 'rid' in reply and reply.get('t')!='pickup':gameplay.apply({'t':'replyack','id':reply['rid']})
+                                        await socket.send(json.dumps(dict(reply,scene=collision.scene)))
+                                        # Guest acknowledges replies after applying them on its server thread.
                                     last_reply_frame=sample['f']
                                 if 'wheel' in sample:
                                     wheel=sample['wheel']

@@ -97,6 +97,7 @@ public final class MobWar {
 
 	public static void damage(final int id, final double amount) {
 		damage.add(new double[] {id, amount});
+        var s=serverOrNull();if(s!=null && s.isSameThread())applyDamage(s.overworld());
 	}
 
 	/** New mobs (and mobs loaded again) hunt proxies; stale proxies from an earlier session are removed. */
@@ -223,7 +224,8 @@ public final class MobWar {
 				continue;
 			}
 
-			// from the nearest person (a cop, most likely), so the mob turns on them
+			// Attribute host damage only to an opposing faction. A nearby survivor
+            // must not become a friendly golem's vanilla retaliation target.
 			LivingEntity from = nearestProxy(level, mob);
 			DamageSource source = from != null ? level.damageSources().mobAttack(from) : level.damageSources().generic();
 			mob.damageCooldownTime = 0; // automatic fire lands several hits inside the usual 10-tick cooldown
@@ -236,7 +238,7 @@ public final class MobWar {
 		double bestD = 48.0 * 48.0;
 		for (Villager v : proxies.values()) {
 			double dd = v.distanceToSqr(mob);
-			if (!v.isRemoved() && dd < bestD) {
+			if (!v.isRemoved() && targetFor(mob,v) && dd < bestD) {
 				best = v;
 				bestD = dd;
 			}
@@ -284,7 +286,7 @@ public final class MobWar {
 			return;
 		}
 
-		s.execute(() -> {
+		WorldBridge.serverWork(s,() -> {
 			ServerLevel level = s.overworld();
 			ServerPlayer player = s.getPlayerList().getPlayers().isEmpty() ? null : s.getPlayerList().getPlayers().get(0);
 			Optional<EntityType<?>> type = BuiltInRegistries.ENTITY_TYPE.getOptional(Identifier.withDefaultNamespace(kind));
@@ -334,7 +336,7 @@ public final class MobWar {
 	public static void clearMobs() {
 		MinecraftServer s = serverOrNull();
 		if (s != null) {
-			s.execute(() -> discardFighters(s.overworld()));
+			WorldBridge.serverWork(s,() -> discardFighters(s.overworld()));
 		}
 	}
 
@@ -349,11 +351,12 @@ public final class MobWar {
 	public static void hostGone() {
 		MinecraftServer s = serverOrNull();
 		if (s != null) {
-			s.execute(MobWar::clearProxies);
+			WorldBridge.serverWork(s,MobWar::clearProxies);
 		}
 	}
 
 	private static void clearProxies() {
+        peds.set(null);damage.clear();
 		proxies.values().forEach(Entity::discard);
 		proxies.clear();
 		handleOf.clear();

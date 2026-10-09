@@ -56,7 +56,7 @@ class CombatTests(unittest.TestCase):
             box.publish('c1m1_hotel');box.publish('c1m2_streets')
             self.assertEqual(len(box.events),0)
             box.apply({'t':'interact'});box.publish('c1m2_streets',active=False)
-            self.assertEqual(len(box.path.read_text().splitlines()),1)
+            self.assertEqual(len(box.path.read_text().splitlines()),2)
 
     def test_mob_hit_carries_attacker_for_source_trace_filter(self):
         with tempfile.TemporaryDirectory() as d:
@@ -80,7 +80,7 @@ class CombatTests(unittest.TestCase):
             box.apply({'t':'chorus'})
             box.publish('c2m1_highway',attack=True,use=True)
             text=box.path.read_text()
-            self.assertEqual(text.splitlines()[0].split()[-2:],['1','1'])
+            self.assertEqual(text.splitlines()[0].split()[6:8],['1','1'])
             self.assertIn('teleport 64 5600 2880',text)
             self.assertIn('chorus',text)
             with self.assertRaises(ValueError):box.apply({'t':'pteleport','pos':[float('nan'),0,0]})
@@ -164,3 +164,11 @@ class EnvironmentalTests(unittest.TestCase):
                 self.assertNotIn('effects',p.read_text())
             for speed in [float('nan'),-1,3]:
                 with self.assertRaises(ValueError):box.apply({'t':'effects','speed':speed,'burn':True})
+
+class FramedGameplayTests(unittest.TestCase):
+    def test_heartbeat_has_round_epoch_and_complete_payload_marker(self):
+        with tempfile.TemporaryDirectory() as d:
+            b=GameplayMailbox(Path(d)/'mailbox');b.epoch=17;b.apply({'t':'heal','h':4});b.publish('c1m1_hotel')
+            rows=b.path.read_text().splitlines();header=rows[0].split()
+            self.assertEqual(len(header),9);self.assertEqual(header[8],'17')
+            self.assertEqual(rows[-1].split(),['end',header[3],str(len(rows)-2)])
