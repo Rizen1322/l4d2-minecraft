@@ -14,3 +14,8 @@ passthrough/guest/run/
 passthrough/guest-game/
 passthrough/events.jsonl
 passthrough/native/build/
+l4d2mc.local.json
+.env
+.env.*
+output/
+release/

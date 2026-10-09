@@ -3,14 +3,19 @@ from pathlib import Path
 import re
 import struct
 import subprocess
+import argparse
+import sys
 import hud_layout
 
 ROOT=Path(__file__).resolve().parents[1]
-GAME=Path(r'E:\SteamLibrary\steamapps\common\Left 4 Dead 2')
+sys.path.insert(0,str(ROOT/'passthrough'))
+from runtime_paths import game_path
+GAME=None
 FILES={'scripts/hudlayout.res',*(f'resource/ui/hud/{n}.res' for n in
        ('teamdisplayhud','teamdisplayhud_vertical','teammatepanel','teammatepanel_incap'))}
 
 def read_resources(game=GAME):
+    game=game_path(game)
     archive=game/'left4dead2/pak01_dir.vpk';data=archive.read_bytes()
     signature,version,size=struct.unpack_from('<III',data)
     if signature!=0x55aa1234 or version not in (1,2):raise ValueError('Unsupported VPK')
@@ -50,6 +55,7 @@ def patch_panel(text,name,values):
     return text[:a]+panel+text[b:]
 
 def build(game=GAME):
+    game=game_path(game)
     files=read_resources(game);stage=ROOT/'dist/l4d2mc_hud';stage.mkdir(parents=True,exist_ok=True)
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeaponSelection',{'xpos':3000,'visible':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeapon',{'visible':0,'enabled':0,'wide':0,'tall':0})
@@ -76,4 +82,6 @@ def build(game=GAME):
     print('Private HUD package:',package)
     return package
 
-if __name__=='__main__':build()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--game',type=Path,default=GAME)
+    build(parser.parse_args().game)

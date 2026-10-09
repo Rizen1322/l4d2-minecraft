@@ -91,8 +91,9 @@ L4D2MCBridge.TotemTick <- function(player) {
             if(v.fall && v.recoveries<1) {v.applied=false;v.recoveries++;TotemResult(["event","0","totemresult",v.key,"1"],player);}
             return;
         }
-        local key=v.key;survival.totemPending=null;survival.totemHeld=false;
-        Reply("\"t\":\"totemapplied\",\"key\":\""+key+"\"");
+        local key=v.key;
+        if(!Reply("\"t\":\"totemapplied\",\"key\":\""+key+"\""))return;
+        survival.totemPending=null;survival.totemHeld=false;
         printl("[L4D2MC TOTEM] confirmed "+key);return;
     }
     if(Time()<v.next)return;v.next=Time()+0.5;
@@ -139,10 +140,11 @@ L4D2MCBridge.Effects <- function(f) {
 };
 L4D2MCBridge.Reply <- function(body) {
     local count=0;foreach(id,value in gameplay.replies)count++;
-    if(count>=64)return;
+    if(count>=64)return false;
     survival.replySerial++;
     local id=survival.replySerial;
     gameplay.replies[id]<-format("{\"rid\":%d,%s}",id,body);
+    return true;
 };
 L4D2MCBridge.Equipment <- function(fields,player) {
     if(fields.len()!=4)return;
@@ -500,6 +502,7 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
                 b.survival.links.clear();
                 b.ClearCollision();b.collisionSequence="";
                 b.gameplay.content=null;b.gameplay.armed=false;b.gameplay.replies.clear();
+                if("navigation" in b){b.navigation.jobs.clear();b.navigation.index=0;}
             }
         },
         OnGameEvent_tongue_grab=function(event) {

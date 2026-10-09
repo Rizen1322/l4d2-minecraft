@@ -3,8 +3,10 @@ import json
 import argparse
 from pathlib import Path
 from install import ROOT,GAME,GUEST,RECEIPT,digest,install_file
+from runtime_paths import game_path
 
 def update(game=GAME):
+    game=game_path(game)
     manifest=json.loads(RECEIPT.read_text(encoding='utf-8'))
     files=[(ROOT/'passthrough/guest/build/libs/passthrough-0.1.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),

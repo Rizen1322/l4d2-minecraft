@@ -43,10 +43,14 @@ L4D2MCBridge.NavRequest <- function(f,player) {
     local goal=Vector(Number(f[6]),Number(f[7]),Number(f[8]));
     local width=Number(f[9],512),height=Number(f[10],512);
     if(width<=0 || height<=0 || (p-player.GetOrigin()).Length()>2048 || (goal-p).Length()>4096)return;
-    if(id in navigation.jobs && navigation.jobs[id].q==q){navigation.jobs[id].heard=Time();return;}
+    if(id in navigation.jobs && navigation.jobs[id].q==q){
+        local job=navigation.jobs[id];job.heard=Time();
+        if(job.done && !job.answered)NavAnswer(id,job,[],false);
+        return;
+    }
     if(!(id in navigation.jobs) && navigation.jobs.len()>=12)return;
     local job={q=q,heard=Time(),from=p,goal=goal,width=width,height=height,done=false,queue=[],head=0,
-        parent={},area={},portal={},start=-1,target=-1,current=null,dir=0,adj=0,started=Time()};
+        parent={},area={},portal={},start=-1,target=-1,current=null,dir=0,adj=0,started=Time(),answer=null,answered=false};
     navigation.jobs[id]<-job;
     if(!("NavMesh" in getroottable())){job.done=true;NavAnswer(id,job,[],false);return;}
     local start=NavMesh.GetNavArea(p+Vector(0,0,16),48),end=NavMesh.GetNavArea(goal+Vector(0,0,16),48);
@@ -55,6 +59,8 @@ L4D2MCBridge.NavRequest <- function(f,player) {
     job.parent[job.start]<- -1;
 };
 L4D2MCBridge.NavAnswer <- function(id,job,points,ok) {
+    if(job.answered)return;
+    if(job.answer!=null){job.answered=Reply(job.answer);return;}
     local los=false;
     if(ok) {
         local t=Raycast(job.from+Vector(0,0,job.height/2),job.goal+Vector(0,0,32),null);
@@ -65,13 +71,16 @@ L4D2MCBridge.NavAnswer <- function(id,job,points,ok) {
     for(local i=0;i<points.len() && i<32;i++) {
         local p=points[i];text+=format("%s[%.4f,%.4f,%.4f]",i==0?"":",",p.x/32,p.z/32,-p.y/32);
     }
-    Reply(text+"]");
+    // Cache the complete result before queuing. Backpressure must not turn a
+    // finished search into a permanently lost path or recompute a different LOS.
+    job.answer=text+"]";job.answered=Reply(job.answer);
 };
 L4D2MCBridge.NavTick <- function() {
     local stale=[],ids=[];
     foreach(id,job in navigation.jobs) {
         if(Time()-job.heard>2)stale.append(id);
         else if(!job.done)ids.append(id);
+        else if(!job.answered)NavAnswer(id,job,[],false);
     }
     foreach(id in stale)delete navigation.jobs[id];
     if(ids.len()==0)return;

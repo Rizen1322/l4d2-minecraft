@@ -17,6 +17,7 @@ import subprocess
 import time
 import re
 from combat import GameplayMailbox
+from runtime_paths import game_path
 
 POSE_NAME = r"Local\L4D2MinecraftPose"
 POSE_FORMAT = "<IIQdddffff"
@@ -89,6 +90,22 @@ def scene_token(map_name,epoch):
 def accepts_scene(event,scene):
     # Durable receipts and window state survive map transitions; combat/geometry do not.
     return event.get('t') in ('ui','mapready','pickupack','rewardack','hello') or (scene is not None and event.get('scene')==scene)
+
+def reset_input_session(inputs,memory,host_input):
+    """Release Source ownership now, and reassert held actions after guest attach resets its keys."""
+    inputs.enabled=inputs.focused=inputs.gui_open=inputs.was_gui=False
+    for state in (inputs.down,inputs.world_down,inputs.gui_down,inputs.repeat_at):state.clear()
+    memory.input(False,False,0)
+    host_input.set_gui(False)
+    host_input.controls(False)
+
+class SourceUpdateGate:
+    """Native cameras may advance at 120 FPS while server snapshots remain at 30 Hz."""
+    def __init__(self):self.identity=None
+    def changed(self,sample,ready):
+        identity=(sample['map'],sample.get('epoch',0),sample['f'],ready)
+        if identity==self.identity:return False
+        self.identity=identity;return True
 
 class RewardOutbox:
     def __init__(self,path):self.path=path
@@ -521,6 +538,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
         try:
             async with websockets.connect("ws://127.0.0.1:25601", max_size=1024*1024) as socket:
                 print("Minecraft guest connected", flush=True)
+                reset_input_session(inputs,memory,host_input)
                 collision.cells.clear();collision.scene=None
                 await socket.send(json.dumps({'t':'attach'}))
                 await socket.send(json.dumps({'t':'clear'}))
@@ -541,7 +559,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                 guest_map = None
                 map_ready = False
                 last_world_request = 0.0
-                last_reply_frame = None
+                source_updates=SourceUpdateGate()
                 was_host_menu = False
                 while True:
                     host_fresh = False
@@ -561,6 +579,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[];gameplay.protection=None
                                 last_frame=None;last_render=None
                                 last_world_request=0.0
+                                last_wheel=None
                             if time.monotonic()-last_world_request>1.0:
                                 await socket.send(json.dumps({'t':'world','map':guest_map[0],'epoch':guest_map[1],'scene':collision.scene}))
                                 last_world_request=time.monotonic()
@@ -585,24 +604,23 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 if sync_after is not None and frames.fresh() and time.monotonic() >= max(sync_after,next_sync):
                                     await socket.send(json.dumps({'t':'blocksync','r':16,'id':sync_id,'scene':collision.scene}))
                                     next_sync = time.monotonic()+2
-                                pose_surface = surface(sample)
-                                await socket.send(json.dumps({'t':'surface','hit':pose_surface,'scene':collision.scene}))
-                                if 'health' in sample:
-                                    await socket.send(json.dumps({'t':'hosthealth','h':sample['health'],'scene':collision.scene}))
-                                if 'actors' in sample:
-                                    await socket.send(json.dumps({'t':'peds','p':sample['actors'],'scene':collision.scene}))
-                                if sample.get('physground'):
-                                    await socket.send(json.dumps({'t':'physground','p':sample['physground'],'scene':collision.scene}))
-                                if sample['f']!=last_reply_frame:
+                                if source_updates.changed(sample,map_ready):
+                                    pose_surface = surface(sample)
+                                    await socket.send(json.dumps({'t':'surface','hit':pose_surface,'scene':collision.scene}))
+                                    if 'health' in sample:
+                                        await socket.send(json.dumps({'t':'hosthealth','h':sample['health'],'scene':collision.scene}))
+                                    if 'actors' in sample:
+                                        await socket.send(json.dumps({'t':'peds','p':sample['actors'],'scene':collision.scene}))
+                                    if sample.get('physground'):
+                                        await socket.send(json.dumps({'t':'physground','p':sample['physground'],'scene':collision.scene}))
                                     for reply in sample.get('replies',[])[:64]:
                                         await socket.send(json.dumps(dict(reply,scene=collision.scene)))
                                         # Guest acknowledges replies after applying them on its server thread.
-                                    last_reply_frame=sample['f']
-                                if 'wheel' in sample:
-                                    wheel=sample['wheel']
-                                    if last_wheel is not None and wheel!=last_wheel:
-                                        await socket.send(json.dumps({'t':'scroll','d':wheel-last_wheel}))
-                                    last_wheel=wheel
+                                    if 'wheel' in sample:
+                                        wheel=sample['wheel']
+                                        if last_wheel is not None and wheel!=last_wheel:
+                                            await socket.send(json.dumps({'t':'scroll','d':wheel-last_wheel,'scene':collision.scene}))
+                                        last_wheel=wheel
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
                     if time.monotonic()-last_rewards>1.0:
@@ -621,7 +639,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                     memory.input(gui_enabled,inputs.enabled,inputs.movement())
                     for command in commands:
                         if command.get('k')=='perspective':host_input.cycle_perspective()
-                        else:await socket.send(json.dumps(command))
+                        else:await socket.send(json.dumps(dict(command,scene=collision.scene)))
                     if collision.map and time.monotonic()-last_gameplay>0.05:
                         gameplay.publish(collision.map,active=inputs.enabled,gui=gui_enabled,
                             sprint=inputs.enabled and not gui_enabled and bool(inputs.user.GetAsyncKeyState(0x11)&0x8000),
@@ -654,23 +672,25 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
         except (OSError, websockets.exceptions.ConnectionClosed) as error:
             if isinstance(error,websockets.exceptions.ConnectionClosed) and error.rcvd and error.rcvd.code==1008:
                 raise RuntimeError('Minecraft is already owned by another bridge; stop the older launcher') from error
-            host_input.set_gui(False)
+            reset_input_session(inputs,memory,host_input)
             collision.cells.clear()
             if collision.map:
-                collision.publish(collision.map,[0,0,0])
+                collision.publish(collision.map,[0,0,0],active=False)
+                gameplay.publish(collision.map,active=False)
             print("Waiting for Minecraft guest:", type(error).__name__, flush=True)
             await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--game", type=Path, default=Path(r"E:\SteamLibrary\steamapps\common\Left 4 Dead 2"))
+    parser.add_argument("--game", type=Path)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--events", type=Path, default=Path(__file__).parent / "events.jsonl")
     parser.add_argument('--play-cfg',default='')
     parser.add_argument('--restore-cfg',default='')
     arguments = parser.parse_args()
+    arguments.game=game_path(arguments.game)
     if not 320 <= arguments.width <= 3840 or not 240 <= arguments.height <= 2160:
         parser.error("unsupported guest dimensions")
     lock=None

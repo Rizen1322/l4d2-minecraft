@@ -78,6 +78,7 @@ public final class HostLink extends WebSocketServer {
         synchronized(controllerLock) {
             if(conn!=controller)return;
             controller=null;generation=++controllerGeneration;
+            latestSnapshots.clear();
         }
         Minecraft minecraft=Minecraft.getInstance();
         minecraft.execute(()->{if(controller==null && controllerGeneration==generation)ClientInput.releaseRelay(minecraft);});
@@ -103,25 +104,34 @@ public final class HostLink extends WebSocketServer {
         "hosthealth","peds","physground","projhit","equipmenthit","shieldcooldown","breakblock",
         "mobdmg","mobpos","navpath","supply","blocksync","totemrequest","totemapplied");
     private final dev.rehan.passthrough.ReplyTracker replies=new dev.rehan.passthrough.ReplyTracker();
+    private record SnapshotKey(long scene,long generation,String type) {}
+    private final dev.rehan.passthrough.LatestTaskQueue<SnapshotKey> latestSnapshots=new dev.rehan.passthrough.LatestTaskQueue<>();
+    private java.lang.ref.WeakReference<net.minecraft.server.MinecraftServer> snapshotServer=new java.lang.ref.WeakReference<>(null);
+    private static final java.util.Set<String> LATEST_SNAPSHOTS=java.util.Set.of("hosthealth","peds","physground");
     private void ackReply(int rid){Passthrough.events.accept("{\"t\":\"replyack\",\"id\":"+rid+"}");}
     private void queueSource(WebSocket conn,JsonObject m){
         if(!m.has("scene"))return;
         long scene=m.get("scene").getAsLong(),generation=controllerGeneration;
         int rid=m.has("rid")?m.get("rid").getAsInt():0;
         if(rid<0)return;
-        var server=WorldBridge.server();if(server==null || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
+        var server=WorldBridge.server();
+        synchronized(controllerLock){if(snapshotServer.get()!=server){latestSnapshots.clear();snapshotServer=new java.lang.ref.WeakReference<>(server);}}
+        if(server==null || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
         if(rid>0){
             var status=replies.begin(scene,generation,rid);
             if(status==dev.rehan.passthrough.ReplyTracker.Status.DONE){ackReply(rid);return;}
             if(status==dev.rehan.passthrough.ReplyTracker.Status.PENDING)return;
         }
-        server.execute(()->{boolean success=false;try{
-            if(conn!=controller || generation!=controllerGeneration || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
+        Runnable apply=()->{boolean success=false;try{
+            if(conn!=controller || generation!=controllerGeneration || WorldBridge.server()!=server || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
             dispatch(conn,m);
             success=true;
             if(rid>0)ackReply(rid);
         }catch(RuntimeException error){Passthrough.LOG.warn("Source reply not applied; retained for retry",error);}
-        finally{if(rid>0)replies.finish(scene,generation,rid,success);}});
+        finally{if(rid>0)replies.finish(scene,generation,rid,success);}};
+        if(rid==0 && LATEST_SNAPSHOTS.contains(m.get("t").getAsString()))
+            latestSnapshots.submit(new SnapshotKey(scene,generation,m.get("t").getAsString()),server::execute,apply);
+        else server.execute(apply);
     }
     private void dispatch(WebSocket conn,JsonObject m){
 			switch (m.get("t").getAsString()) {
@@ -132,7 +142,7 @@ public final class HostLink extends WebSocketServer {
                         if(previous!=null && previous!=conn && previous.isOpen()) {
                             conn.close(1008,"another host already owns the guest");return;
                         }
-                        controller=conn;generation=++controllerGeneration;replies.newOwner();
+                        controller=conn;generation=++controllerGeneration;replies.newOwner();latestSnapshots.clear();
                     }
                     Minecraft minecraft=Minecraft.getInstance();
                     minecraft.execute(()->{if(controller==conn && controllerGeneration==generation)ClientInput.releaseRelay(minecraft);});
@@ -194,7 +204,13 @@ public final class HostLink extends WebSocketServer {
 				case "glide" -> WorldBridge.glide(!m.has("on") || m.get("on").getAsBoolean(), m.has("speed") ? m.get("speed").getAsDouble() : 1.2);
 				default -> {
 					Minecraft minecraft = Minecraft.getInstance();
-					minecraft.execute(() -> {if(controller==conn)ClientInput.handle(minecraft, m);});
+                    long generation=controllerGeneration,scene=m.has("scene")?m.get("scene").getAsLong():dev.rehan.passthrough.MapBuilds.scene();
+                    String type=m.get("t").getAsString();
+                    boolean cleanup=type.equals("view") || type.equals("hud")
+                        || (type.equals("key") && m.has("k") && m.get("k").getAsString().equals("escape"))
+                        || (java.util.Set.of("key","mouse","guikey").contains(type) && m.has("down") && !m.get("down").getAsBoolean());
+					minecraft.execute(() -> {if(dev.rehan.passthrough.InputOwnerPolicy.accept(controller==conn,generation,controllerGeneration,
+                        scene,dev.rehan.passthrough.MapBuilds.scene(),cleanup))ClientInput.handle(minecraft, m);});
 				}
 			}
     }

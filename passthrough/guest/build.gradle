@@ -109,6 +109,13 @@ tasks.register('verifyTeamHudPolicy', JavaExec) {
 }
 check.dependsOn verifyTeamHudPolicy
 
+tasks.register('verifyClientInputPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.ClientInputPolicyTest'
+}
+check.dependsOn verifyClientInputPolicy
+
 tasks.register('verifyEquipmentWearPolicy', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath

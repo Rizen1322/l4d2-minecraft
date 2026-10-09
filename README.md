@@ -1,88 +1,84 @@
-# Minecraft внутри L4D2 — первый рабочий срез
+# Minecraft inside Left 4 Dead 2
 
-Новая связка запускает **настоящий Minecraft 26.3** рядом с L4D2 и передаёт его
-блоки, руку, хотбар и инвентарь в изображение настоящей карты Dead Center.
-Движение, оружие и заражённые остаются в L4D2.
+**Experimental Windows source release.** Real Minecraft runs alongside L4D2.
+Source supplies the map, movement and infected; Minecraft supplies blocks,
+items, inventory, mobs and Steve. A local bridge and x86 ReShade add-on composite
+Minecraft's colour/depth/UI into L4D2. This is an independent fan project.
 
-Запуск: в Legacy Launcher выбрать **L4D2MC-Fabric-26.3**, затем открыть
-**Play-Minecraft.cmd**. Minecraft держать несвёрнутым, за окном L4D2.
-V — установка, B — разрушение, N — следующий слот, F9 — инвентарь.
+## What is implemented
 
-Подробные проверки, ограничения и удаление: [passthrough/README.md](passthrough/README.md).
-Это локальный прототип для c1m1_hotel; полный перенос Steve и всей геометрии
-карты пока не реализован. Старый самостоятельный VScript-черновик ниже оставлен
-как архив разработки и отключён.
+- Place and break Minecraft blocks on Source maps, with bounded collision proxies.
+- Minecraft inventory/hotbar; Source walking/jumping and Source Escape menu.
+- Swords with cleave, shields/cooldown, armour, food and health sync.
+- TNT, flint-and-steel fire, ender pearls, chorus fruit and held totems.
+- Iron golems targeting infected, plus native navigation/collision queries.
+- L4D2 pickups converted to Minecraft supplies; durable reward/item receipts.
+- Scene isolation on map changes/restarts; teammate cards above the full shield.
 
-# L4D2 Block Sandbox 0.1
+Implemented mechanics do **not** mean every item or map is fully supported.
+Recent fixes passed offline tests; full runtime revalidation is pending.
+See [known issues](docs/KNOWN_ISSUES.md).
 
-**Статус: незавершённый черновик, отключён в игре.** Во время разработки пользователь уточнил цель: настоящий Minecraft, встроенный в карты и движок L4D2 по образцу Portalcraft. Дальнейшее направление исследовано в `PASSTHROUGH_RESEARCH.md`. Этот VScript-прототип сохраняется как эксперимент с физическими кубами; его инструкции ниже описывают предполагаемое использование, а не подтверждённый готовый релиз. Полный интеграционный тест не завершён.
+## Requirements
 
-Первый прототип строительства кубами в Left 4 Dead 2. Собственная VScript-мутация: обычное оружие и заражённые L4D2, материалы земля/камень/доски, установка, удаление и сохранение построек на карте.
+| Component | Tested target |
+|---|---|
+| Host | Windows, Steam L4D2, local `-insecure` session |
+| Guest | Minecraft Java26.3, Java25, Fabric0.19.5, Fabric API0.161.0+26.3 |
+| Renderer | Direct3D9, x86 ReShade6.8.0 with full add-on support |
+| Build | Python3.12+, Zig0.15.2, ReShade6.8 SDK headers, Squirrel3.2 compiler |
+| Private HUD build | Official L4D2 Authoring Tools (`vpk.exe`) |
 
-## Как играть
+Use your own copies of both games and a normal signed-in Minecraft launcher.
+The repository/ZIP does not contain either game, ReShade, saves, launcher
+credentials or privately extracted HUD assets. Distribution is source-only:
+compiled guest JARs contain private portraits and must not be uploaded.
 
-Аддон устанавливается в `left4dead2/addons/l4d2mc_blocks.vpk`. После установки перезапустите L4D2. Откройте консоль и выполните:
+## Setup and launch
 
-```
-map c1m1_hotel mcblocks
-exec l4d2mc_keys
-```
+1. Install requirements from official sources, then Python packages:
+   `python -m pip install -r requirements.txt`.
+2. Close both games. Run [Setup-L4D2MC.ps1](Setup-L4D2MC.ps1) with your game,
+   launcher and tool paths. It builds/checks/installs owned files without launching
+   games. [Exact commands and tool links](docs/INSTALL.md).
+3. In your Minecraft launcher, select **L4D2MC-Fabric-26.3** and launch normally.
+   Use its private guest world; keep Minecraft rendering behind L4D2.
+4. Run **Launch-L4D2MC-2K.bat** for2560×1440 borderless, or
+   `Launch-Minecraft.ps1 -Width 1920 -Height 1080 -Borderless`.
+   Keep the launch console open until exit so temporary controls restore.
 
-Клавиши: **V** поставить, **B** убрать, **N** следующий материал, **F6** сохранить, **F7** загрузить. ЛКМ и ПКМ остаются стрельбой и толчком. Выполнение `exec l4d2mc_keys` меняет назначение этих пяти клавиш; старые назначения есть в копии `cfg` под `backups/`.
+The launcher applies built updates before starting L4D2. A locked native add-on
+requires exiting L4D2 first. Steam library detection is automatic; explicit
+`-Game`, `L4D2MC_GAME`, or ignored `l4d2mc.local.json` overrides it. Custom
+Minecraft launcher directories use `L4D2MC_MINECRAFT` or the same local config.
 
-Чат-команды работают без изменения клавиш:
+## Controls
 
-```
-!mc place
-!mc break
-!mc type dirt
-!mc type stone
-!mc type wood
-!mc next
-!mc save
-!mc load
-!mc backup
-!mc status
-!mc help
-```
+| Input | Action |
+|---|---|
+| WASD / Space | L4D2 movement / jump |
+| Left mouse | Minecraft attack / break |
+| Right mouse | Minecraft use/place; Source doors/buttons/carry interactions |
+| E | Minecraft inventory |
+| Escape | Source pause menu; closes guest UI first |
+| 1–9 / wheel | Hotbar |
+| Q / F | Drop / swap hands |
+| F5 | Camera perspective |
+| T / / | Minecraft chat / command |
 
-Первый блок ставьте на ровном полу в пределах 192 units. Наведитесь на грань блока, чтобы продолжить стену или поднять её вверх. Блоки имеют размер 32 units и привязаны к мировой сетке; на полу вне сетки первый ряд может немного висеть над поверхностью. Нельзя поставить куб в игрока, занятую ячейку или рядом с дверью безопасной комнаты.
+## Development and release
 
-`!mc save` записывает постройку для текущей карты. Для загрузки перезапустите карту, отойдите от места сохранённой постройки и выполните `!mc load`. Загрузка в непустую сессию запрещена; она не стирает уже поставленные блоки. При ошибке основной копии `!mc backup` загружает предыдущую исправную копию. Файлы находятся в `left4dead2/ems/l4d2mc/<map>.blocks`.
+`passthrough/build.ps1` runs guest/native x86 builds, a real hidden-window cursor
+regression, Python tests and standalone Source suites. No games launch during
+these checks. See [development guide](docs/DEVELOPMENT.md).
 
-## Запуск с изолированным набором аддонов
+`python tools/release_source.py --check` audits the allowlisted source payload.
+`python tools/release_source.py` creates a reproducible ZIP with SHA256 and per-file
+manifest. It excludes builds, extracted assets, profiles and common credentials.
 
-Для установки в этой рабочей папке:
+[Changelog](CHANGELOG.md) · [Troubleshooting / uninstall](docs/TROUBLESHOOTING.md)
+· [Credits and AI disclosure](CREDITS.md) · [MIT license](LICENSE)
 
-```
-python tools/manage.py build
-python tools/manage.py install
-```
-
-`Play.cmd` запускает локальную игру с временно отключёнными другими аддонами и восстанавливает их список после закрытия игры. Держите окно запуска открытым до выхода из игры. При принудительном закрытии окна запуска восстановите `addonlist.txt` из показанной папки `backups/play-...`. Запуск с остальными аддонами: `Launch-BlockSandbox.ps1 -KeepOtherAddons`; их совместимость не гарантируется. Для другой карты передайте `-Map c2m1_highway`.
-
-## Ограничения первой версии
-
-- До 128 блоков, дополнительно ограниченных запасом entities карты. Карты и орды различаются по нагрузке.
-- Разрушаются только блоки этого мода. Исходные стены карты не становятся voxel-блоками.
-- Нет крафта, ресурсов, редстоуна, бесконечного мира и полной симуляции Minecraft.
-- Заражённые и пули пока не разрушают кубы; навигация по новым лестницам не строится.
-- VScript L4D2 не предоставляет hull trace: объём проверяется сеткой лучей. Очень тонкие элементы между лучами могут остаться незамеченными; строить рекомендуется на открытых площадках.
-- Первый этап рассчитан на локальную игру. Кооператив и другие Workshop-аддоны требуют отдельной проверки.
-
-## Сборка исходных материалов
-
-Требуется установленный официальный Left 4 Dead 2 Authoring Tools (Steam 563), Python 3 и Pillow:
-
-```
-python tools/build_assets.py --game "E:\SteamLibrary\steamapps\common\Left 4 Dead 2"
-python tools/manage.py build
-```
-
-Геометрия и три пиксельные текстуры созданы специально для этого аддона. Используется официальный Valve compiler; промежуточные файлы собираются в рабочей папке, не поверх ресурсов игры. Ресурсы Minecraft и сторонних Workshop-модов в пакет не входят. Код создан при участии Codex.
-
-## Удаление и резервные копии
-
-Закройте игру и уберите только `left4dead2/addons/l4d2mc_blocks.vpk`. Сохранения построек можно оставить. Если применяли горячие клавиши, верните прежние назначения из резервной `cfg/config.cfg` или переназначьте их в игре. Установщик не меняет реестр, gameinfo или игровые DLL.
-
-Результаты выполненных проверок и фактические ограничения записываются в `MODLOG.md`. Приватные `tests.nut`, `probe.nut` и `integration.nut` в игровой VPK не включаются.
+The earlier cube experiment remains in `addon/` and `assets-src/` as history.
+The active mashup still uses its own generated cube for native collisions;
+the ZIP includes its procedural source generator, not precompiled model files.

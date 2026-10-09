@@ -91,6 +91,10 @@ final class ClientInput {
 					return;
 				}
 
+                // The inventory may have opened after this world event was
+                // queued. GUI mouse/key events have their own dedicated path.
+                if(!dev.rehan.passthrough.ClientInputPolicy.acceptKey(k,down,minecraft.gui.screen()!=null))return;
+
 				if(k.equals("drop") && down && player!=null && m.has("mods") && (m.get("mods").getAsInt()&64)!=0) {
                     minecraft.gameMode.dropItem(player,true);return;
                 }

@@ -3,9 +3,25 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import install
+from types import SimpleNamespace
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_invalid_loader_refused_before_game_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            loader=Path(directory)/'loader.dll';loader.write_bytes(b'not a PE')
+            with self.assertRaises(RuntimeError):install.validate_reshade(loader)
+            with self.assertRaises(RuntimeError):install.validate_reshade(Path(directory))
+
+    def test_x64_reshade_refused_and_x86_api_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            loader=Path(directory)/'loader.dll';loader.touch()
+            binary=SimpleNamespace(FILE_HEADER=SimpleNamespace(Machine=0x8664),
+                DIRECTORY_ENTRY_EXPORT=SimpleNamespace(symbols=[SimpleNamespace(name=n) for n in (b'ReShadeRegisterAddon',b'ReShadeUnregisterAddon')]),close=lambda:None)
+            with patch('pefile.PE',return_value=binary):
+                with self.assertRaises(RuntimeError):install.validate_reshade(loader)
+                binary.FILE_HEADER.Machine=0x14c;install.validate_reshade(loader)
+
     def test_identical_existing_file_never_becomes_owned(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

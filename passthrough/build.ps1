@@ -1,21 +1,45 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([string]$Game='', [string]$JavaHome=$env:JAVA_HOME, [string]$Zig='', [string]$ReShadeInclude='', [string]$Squirrel='')
+$ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 Set-Location -LiteralPath $projectRoot
-python tools/private_hud_assets.py
+if (!$Game) { $Game = & python passthrough/runtime_paths.py game; if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve L4D2 path.' } }
+if (!$JavaHome) {
+    $javaCommand=Get-Command java -ErrorAction SilentlyContinue
+    if ($javaCommand) { $JavaHome=Split-Path (Split-Path $javaCommand.Source -Parent) -Parent }
+    else { $JavaHome=Join-Path $env:APPDATA '.tlauncher\legacy\Minecraft\jre\java-runtime-epsilon\windows-x64\java-runtime-epsilon' }
+}
+if (!(Test-Path -LiteralPath (Join-Path $JavaHome 'bin/java.exe'))) { throw 'Java25 required: set JAVA_HOME or pass -JavaHome.' }
+$env:JAVA_HOME=$JavaHome
+if (!$Zig) {
+    $zigCommand=Get-Command zig -ErrorAction SilentlyContinue
+    $Zig=if ($zigCommand) {$zigCommand.Source} else {Join-Path $projectRoot 'toolchains/zig-x86_64-windows-0.15.2/zig.exe'}
+}
+if (!(Test-Path -LiteralPath $Zig)) { throw 'Zig0.15.2 required: put zig on PATH or pass -Zig.' }
+if (!$ReShadeInclude) { $ReShadeInclude=Join-Path $projectRoot 'toolchains/reshade-6.8.0/include' }
+if (!(Test-Path -LiteralPath (Join-Path $ReShadeInclude 'reshade.hpp'))) { throw 'ReShade6.8 SDK headers required: pass -ReShadeInclude.' }
+if (!$Squirrel) { $Squirrel=Join-Path $projectRoot 'toolchains/squirrel-parser/sq.exe' }
+if (!(Test-Path -LiteralPath $Squirrel)) { throw 'Standalone Squirrel3.2 compiler required: pass -Squirrel. Full Source checks cannot be skipped.' }
+$cubeComplete=$true
+foreach ($extension in @('mdl','phy','vvd','dx90.vtx')) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot ('addon/models/l4d2mc/cube.'+$extension)))) { $cubeComplete=$false } }
+foreach ($material in @('dirt','stone','wood')) { foreach ($extension in @('vmt','vtf')) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot ('addon/materials/l4d2mc/'+$material+'.'+$extension)))) { $cubeComplete=$false } } }
+if (!$cubeComplete) {
+    python tools/build_assets.py --game $Game
+    if ($LASTEXITCODE -ne 0) { throw 'Own collision model build failed.' }
+}
+python tools/private_hud_assets.py --game $Game
 if ($LASTEXITCODE -ne 0) { throw 'Private teammate asset conversion failed' }
-python tools/build_hud.py
+python tools/build_hud.py --game $Game
 if ($LASTEXITCODE -ne 0) { throw 'Private native HUD package failed' }
-$env:JAVA_HOME = 'C:\Users\Rizen\AppData\Roaming\.tlauncher\legacy\Minecraft\jre\java-runtime-epsilon\windows-x64\java-runtime-epsilon'
 & '.\passthrough\guest\gradlew.bat' -p '.\passthrough\guest' build --no-daemon
 if ($LASTEXITCODE -ne 0) { throw 'Guest build failed' }
 # ReShade is built with MSVC. Its x86 member functions return small handle
 # structs through a hidden pointer. compositor.cpp contains the explicit ABI wrapper.
-& '.\toolchains\zig-x86_64-windows-0.15.2\zig.exe' c++ -target x86-windows-gnu -std=c++17 -O2 -shared -I toolchains/reshade-6.8.0/include passthrough/native/addon.cpp passthrough/native/compositor.cpp -o dist/L4D2Minecraft.dll -luser32
+& $Zig c++ -target x86-windows-gnu -std=c++17 -O2 -shared -I $ReShadeInclude passthrough/native/addon.cpp passthrough/native/compositor.cpp -o dist/L4D2Minecraft.dll -luser32
 if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
 Copy-Item -LiteralPath 'dist/L4D2Minecraft.dll' -Destination 'dist/L4D2Minecraft.addon32'
 python -c "import pefile; p=pefile.PE('dist/L4D2Minecraft.addon32'); assert p.FILE_HEADER.Machine == 0x14c; assert b'AddonInit' in [e.name for e in p.DIRECTORY_ENTRY_EXPORT.symbols]; print('Verified x86 PE DLL with AddonInit')"
 if ($LASTEXITCODE -ne 0) { throw 'Native binary validation failed' }
-& '.\toolchains\zig-x86_64-windows-0.15.2\zig.exe' c++ -target x86-windows-gnu -std=c++17 -O2 passthrough/test_cursor.cpp -o dist/test_cursor.exe -luser32
+& $Zig c++ -target x86-windows-gnu -std=c++17 -O2 passthrough/test_cursor.cpp -o dist/test_cursor.exe -luser32
 if ($LASTEXITCODE -ne 0) { throw 'Native cursor test build failed' }
 & '.\dist\test_cursor.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Native cursor regression failed' }
@@ -24,7 +48,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Camera tests failed' }
 
 function Invoke-CheckedSquirrel {
     param([string[]]$CheckArguments,[string]$Success='')
-    $checkOutput = & './toolchains/squirrel-parser/sq.exe' @CheckArguments 2>&1
+    $checkOutput = & $Squirrel @CheckArguments 2>&1
     $checkExit = $LASTEXITCODE
     $checkText = ($checkOutput | Out-String)
     if($checkText.Trim()){Write-Output $checkText.Trim()}
@@ -32,7 +56,7 @@ function Invoke-CheckedSquirrel {
         throw 'Standalone Source verification failed (including VM errors with zero exit status).'
     }
 }
-if (Test-Path -LiteralPath 'toolchains/squirrel-parser/sq.exe') {
+if (Test-Path -LiteralPath $Squirrel) {
     foreach ($hostScript in Get-ChildItem -LiteralPath 'passthrough/host' -Filter '*.nut') {
         Invoke-CheckedSquirrel -CheckArguments @('-c','-o','dist/syntax-check.cnut',$hostScript.FullName)
     }

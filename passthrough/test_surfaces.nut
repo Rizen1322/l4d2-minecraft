@@ -15,7 +15,7 @@ function TraceLine(t){t.hit<-t.start.z>t.end.z;t.startsolid<-false;t.pos<-Vec(t.
 dofile("passthrough/host/l4d2mc_gameplay.nut");
 dofile("passthrough/host/l4d2mc_survival.nut");
 dofile("passthrough/host/l4d2mc_navigation.nut");
-local b=L4D2MCBridge;
+local b=L4D2MCBridge,queueReply=L4D2MCBridge.Reply;
 if(b.CompleteMailbox(["3 map 7","1 2 3"],"3"))throw "Partial collision file accepted";
 if(!b.CompleteMailbox(["3 map 7","1 2 3","4 5 6","end 3 2"],"3"))throw "Complete file rejected";
 if(b.CompleteMailbox(["3 map 7","1 2 3","end 3 2"],"3"))throw "Wrong row count accepted";
@@ -34,7 +34,7 @@ class Area {
 }
 local a=Area(1),c=Area(2);a.east=c;
 ::NavMesh<-{GetNavArea=function(pos,beneath){return pos.x<128?a:c;}};
-local answer=null;b.Reply=function(v){answer=v;};
+local answer=null;b.Reply=function(v){answer=v;return true;};
 local player={GetOrigin=function(){return Vec(0,0,0);}};
 b.NavRequest(["nav","1","1","0","0","0","200","0","0","44","90"],player);
 b.NavTick();
@@ -60,7 +60,7 @@ local collisionCleared=false;b.ClearCollision<-function(){collisionCleared=true;
 b.collisionSequence<-"old";b.gameplay.content="old";b.gameplay.armed=true;b.gameplay.replies[5]<-"old";
 L4D2MCSurvivalEvents.OnGameEvent_round_start({});
 if(!collisionCleared || b.collisionSequence!="" || b.gameplay.content!=null || b.gameplay.armed
-    || b.gameplay.replies.len()!=0 || b.survival.links.len()!=0)throw "Prior-round collision/replies/door links survived round_start";
+    || b.gameplay.replies.len()!=0 || b.survival.links.len()!=0 || b.navigation.jobs.len()!=0)throw "Prior-round collision/replies/door links/nav jobs survived round_start";
 local hits=[];
 class Target {
     id=0;kind="";pos=null;friendly=false;
@@ -121,7 +121,7 @@ class RescuePlayer {
     function ReviveFromIncap(){revives++;if(!fail)incap=false;}
     function ReviveByDefib(){revives++;if(!fail){dead=false;incap=false;}}
 }
-local rescued=RescuePlayer(),notices=[];b.Reply=function(body){notices.append(body);};
+local rescued=RescuePlayer(),notices=[];b.Reply=function(body){notices.append(body);return true;};
 b.gameplay.armed=true;b.gameplay.at=now;b.survival.player=rescued;
 b.TotemRequest(rescued);
 if(b.survival.totemPending!=null)throw "Rescue requested without held totem";
@@ -192,4 +192,32 @@ if(b.TeleportPlayer(rescued,anchor,false,true) || rescued.pos.z!=200)throw "Resc
 Entities.FindByClassname=function(previous,kind){return null;};
 ::TraceLine=function(t){t.startsolid<-false;t.hit<-t.start.z>0 && t.end.z<=0;t.pos<-Vec(t.start.x,t.start.y,0);t.normal<-Vec(1,0,0.2);};
 if(b.TeleportPlayer(rescued,anchor,false,true) || rescued.pos.z!=200)throw "Rescue accepted steep snapped floor";
+// Real bounded outbox: an applied totem and a finished route both survive
+// congestion, enqueue exactly once when capacity returns, and never revive twice.
+b.Reply=queueReply;b.gameplay.replies.clear();
+for(local i=0;i<64;i++)b.gameplay.replies[i]<-"busy";
+if(b.Reply("\"t\":\"test\"") || b.gameplay.replies.len()!=64)throw "Reply exceeded its bounded outbox";
+b.survival.totemPending=null;rescued.hp=0;rescued.incap=true;rescued.dead=false;
+b.survival.totemDamageAt=-100;b.survival.totemFallingAt=-100;
+b.gameplay.armed=true;b.gameplay.at=now;b.TotemHeld(["totemheld","1"]);b.TotemRequest(rescued);
+local congestedKey=b.survival.totemPending.key;
+b.TotemResult(["event","507","totemresult",congestedKey,"1"],rescued);
+local revives=rescued.revives;now+=0.2;b.TotemTick(rescued);
+if(!b.TotemPendingFor(rescued) || !b.survival.totemPending.applied || b.gameplay.replies.len()!=64)throw "Congestion lost applied totem transaction";
+delete b.gameplay.replies[0];b.TotemTick(rescued);
+if(b.survival.totemPending!=null || b.gameplay.replies.len()!=64 || rescued.revives!=revives)throw "Totem queue recovery failed or revived twice";
+local confirmations=0;foreach(id,body in b.gameplay.replies)if(body.find("totemapplied")!=null)confirmations++;
+b.TotemTick(rescued);if(confirmations!=1 || b.gameplay.replies.len()!=64)throw "Repeated totem confirmation";
+::TraceLine=function(t){t.hit<-t.start.z>t.end.z;t.startsolid<-false;t.pos<-Vec(t.start.x,t.start.y,0);};
+b.NavRequest(["nav","77","901","0","0","0","200","0","0","44","90"],player);b.NavTick();
+local job=b.navigation.jobs[77];
+if(!job.done || job.answered || job.answer==null || b.gameplay.replies.len()!=64)throw "Full outbox lost completed nav response";
+local cachedAnswer=job.answer;
+b.NavRequest(["nav","77","901","0","0","0","200","0","0","44","90"],player);
+if(job.answered)throw "Nav falsely accepted queued answer";
+delete b.gameplay.replies[1];b.NavTick();
+if(!job.answered || job.answer!=cachedAnswer || b.gameplay.replies.len()!=64)throw "Nav result not retried after congestion";
+b.NavTick();b.NavRequest(["nav","77","901","0","0","0","200","0","0","44","90"],player);
+local routeCount=0;foreach(id,body in b.gameplay.replies)if(body.find("navpath")!=null)routeCount++;
+if(routeCount!=1)throw "Completed nav retry duplicated queued result";
 print("Retail floor/nav and shield capacity regressions passed\n");

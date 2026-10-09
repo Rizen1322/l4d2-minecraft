@@ -410,3 +410,22 @@ Installation attempted: only changed addon32 is locked by running L4D2. New
 binary remains in dist; current process still has previous code. Existing
 Launch-L4D2MC-2K.bat -> Launch-Minecraft.ps1 applies owned update before starting
 next session, so replacement awaits normal user exit/relaunch. No game closed.
+
+2026-10-09 source-alpha audit/preparation:
+Three independent agents reviewed logic/render/transport, then independent review
+checked integration/clean packaging. Fixed full-outbox totem confirmation loss,
+unsent completed nav replies and old-round jobs; reconnect held-key latches,
+render-rate duplicate state, bounded latest-server snapshots and stale queued
+controller/scene inputs; world presses arriving behind inventory now suppressed.
+Portable explicit/env/ignored-local/Steam paths, tool-param build, setup entrypoint
+and x86ReShadeAPI preflight before writes. Review caught missing collision cube
+in sourceZIP; procedural compiler source now shipped/generated on clean build,
+all model/material components required before install. Lazy path resolution
+preserves explicit CLI override even with broken local JSON. Root README replaced
+obsolete controls with current requirements/known issues/credits/license.
+Source-only deterministic allowlist ZIP excludes private HUD/JAR/loader/profiles,
+adds embedded hashes, checksum, offline CI and bug template. No public upload yet.
+Extracted freshZIP compiled owncube via officialstudiomdl into workspace staging,
+guest/native/HUD and all tests:75Python,13JVM,7Source,Win32cursor,PSparse passed.
+No games opened/controlled or saves changed; fullcleaninstall/runtime stillpending.
+Nine owned components then updated and SHAverified, no locked files this attempt.

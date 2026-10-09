@@ -1,5 +1,14 @@
-﻿param([string]$Game = 'E:\SteamLibrary\steamapps\common\Left 4 Dead 2', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
+﻿param([string]$Game = '', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
 $ErrorActionPreference = 'Stop'
+if (!$Game) {
+    $Game = & python (Join-Path $PSScriptRoot 'passthrough\runtime_paths.py') game
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve game path. Set L4D2MC_GAME or pass -Game.' }
+}
+if (!(Test-Path -LiteralPath (Join-Path $Game 'left4dead2.exe'))) { throw 'L4D2 installation missing. Pass -Game or configure l4d2mc.local.json.' }
+$steamRecord=Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue
+$steamExe=$steamRecord.SteamExe
+if (!$steamExe) { $steamExe=Join-Path ${env:ProgramFiles(x86)} 'Steam/steam.exe' }
+if (!(Test-Path -LiteralPath $steamExe)) { throw 'Steam executable missing. Start Steam once so its per-user path is registered.' }
 $existingBridge=Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object {
     $_.CommandLine -match 'l4d2-minecraft[\\/]passthrough[\\/]bridge.py'
 }
@@ -105,7 +114,7 @@ try {
     $windowFlags = '-windowed -w ' + $Width + ' -h ' + $Height
     if($Borderless){$windowFlags += ' -noborder'}
     $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList @('"' + $bridgeScript + '"', '--game', '"' + $Game + '"','--play-cfg',$playCfgName,'--restore-cfg',$restoreCfgName,'--width',[string]$Width,'--height',[string]$Height) -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
-    Start-Process 'C:\Program Files (x86)\Steam\steam.exe' -ArgumentList ('-applaunch 550 -insecure -novid ' + $windowFlags + ' -console -condebug +map ' + $Map) -WindowStyle Hidden
+    Start-Process -FilePath $steamExe -ArgumentList ('-applaunch 550 -insecure -novid ' + $windowFlags + ' -console -condebug +map ' + $Map) -WindowStyle Hidden
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     $nextProbe = [DateTime]::UtcNow.AddSeconds(12)
     while ([DateTime]::UtcNow -lt $deadline) {

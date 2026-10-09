@@ -7,6 +7,33 @@ from bridge import CollisionSnapshot, camera, position, surface, render_camera, 
 
 
 class SessionTests(unittest.TestCase):
+    def test_disconnect_releases_native_input_and_reconnect_reasserts_held_button(self):
+        from bridge import reset_input_session
+        from types import SimpleNamespace
+        calls=[]
+        inputs=SimpleNamespace(enabled=True,focused=True,gui_open=True,was_gui=True,
+            down={1:True},world_down={2:True},gui_down={0x45:True},repeat_at={0x45:123})
+        memory=SimpleNamespace(input=lambda *args:calls.append(('input',args)))
+        host=SimpleNamespace(set_gui=lambda open:calls.append(('gui',open)),controls=lambda active:calls.append(('controls',active)))
+        reset_input_session(inputs,memory,host)
+        self.assertFalse(inputs.enabled or inputs.focused or inputs.gui_open or inputs.was_gui)
+        self.assertIn(('input',(False,False,0)),calls)
+        self.assertIn(('controls',False),calls)
+        self.assertEqual(inputs.down,{})
+        self.assertEqual(inputs.gui_down,{})
+        self.assertEqual(inputs.repeat_at,{})
+        self.assertEqual(relay_keys({2},inputs.world_down,focused=True,gui=False),[{'t':'key','k':'use','down':True}])
+
+    def test_source_snapshots_are_not_queued_for_each_new_render_camera_frame(self):
+        from bridge import SourceUpdateGate
+        gate=SourceUpdateGate();sample={'map':'c1m1_hotel','epoch':12,'f':20}
+        self.assertTrue(gate.changed(sample,False))
+        for _ in range(120):self.assertFalse(gate.changed(sample,False))
+        self.assertTrue(gate.changed(sample,True)) # Retry snapshots rejected during world preparation.
+        self.assertFalse(gate.changed(sample,True))
+        self.assertTrue(gate.changed(dict(sample,f=21),True))
+        self.assertTrue(gate.changed(dict(sample,epoch=13),True))
+
     def test_rewards_survive_map_load_and_invalid_tokens_are_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'rewards';box=RewardOutbox(path)

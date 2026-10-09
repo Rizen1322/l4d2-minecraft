@@ -5,10 +5,11 @@ import hashlib
 import json
 import shutil
 import urllib.request
+from runtime_paths import game_path, minecraft_path
 
 ROOT = Path(__file__).resolve().parents[1]
-GAME = Path(r"E:\SteamLibrary\steamapps\common\Left 4 Dead 2")
-MINECRAFT = Path(r"C:\Users\Rizen\AppData\Roaming\.tlauncher\legacy\Minecraft\game")
+GAME = None
+MINECRAFT = None
 GUEST = ROOT / "passthrough/guest-game"
 RECEIPT = ROOT / "backups/passthrough-install.json"
 
@@ -20,6 +21,20 @@ def digest(path):
 def fetch_json(url):
     with urllib.request.urlopen(url, timeout=30) as response:
         return json.load(response)
+
+def validate_reshade(path):
+    import pefile
+    path=Path(path)
+    if not path.is_file():raise RuntimeError('ReShade loader must be an x86 DLL file')
+    try:
+        binary=pefile.PE(str(path))
+        exports={symbol.name for symbol in binary.DIRECTORY_ENTRY_EXPORT.symbols}
+        if binary.FILE_HEADER.Machine!=0x14c or not {b'ReShadeRegisterAddon',b'ReShadeUnregisterAddon'}<=exports:
+            raise RuntimeError('Expected x86 ReShade DLL with add-on API; x64/other DLL refused')
+    except (pefile.PEFormatError,AttributeError) as error:
+        raise RuntimeError('Invalid ReShade loader') from error
+    finally:
+        if 'binary' in locals():binary.close()
 
 
 def install_file(source, target, manifest):
@@ -39,8 +54,18 @@ def install_file(source, target, manifest):
 
 
 def host(manifest):
+    global GAME
+    GAME=GAME or game_path()
     if not (GAME / "left4dead2.exe").exists():
         raise RuntimeError("L4D2 installation missing")
+    validate_reshade(ROOT/'toolchains/ReShade32.dll')
+    for extension in ('mdl','phy','vvd','dx90.vtx'):
+        if not (ROOT/'addon/models/l4d2mc'/('cube.'+extension)).is_file():
+            raise RuntimeError('Own collision cube missing: run tools/build_assets.py --game <L4D2>')
+    for material in ('dirt','stone','wood'):
+        for extension in ('vmt','vtf'):
+            if not (ROOT/'addon/materials/l4d2mc'/(material+'.'+extension)).is_file():
+                raise RuntimeError('Own cube material missing: run tools/build_assets.py --game <L4D2>')
     staging = ROOT / "dist/passthrough-config"
     staging.mkdir(parents=True, exist_ok=True)
     # All files have unique paths except loader/config; refuse pre-existing owners there.
@@ -72,12 +97,15 @@ def host(manifest):
     ]
     files.extend((p, shader_dir / p.name) for p in (ROOT / "passthrough/shaders").glob('*') if p.is_file())
     files.extend((p, GAME / 'left4dead2/models/l4d2mc' / p.name) for p in (ROOT / 'addon/models/l4d2mc').glob('*') if p.is_file())
+    files.extend((p, GAME / 'left4dead2/materials/l4d2mc' / p.name) for p in (ROOT / 'addon/materials/l4d2mc').glob('*') if p.is_file())
     for source, target in files:
         install_file(source, target, manifest)
     print("L4D2 loader, adapter, shader and VScript installed.")
 
 
 def guest(manifest):
+    global MINECRAFT
+    MINECRAFT=MINECRAFT or minecraft_path()
     jar = ROOT / "passthrough/guest/build/libs/passthrough-0.1.0.jar"
     if not jar.exists():
         raise RuntimeError("Build guest jar first")
@@ -131,6 +159,10 @@ def uninstall(manifest):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=['host', 'guest', 'uninstall'])
+    parser.add_argument('--game',type=Path)
+    parser.add_argument('--minecraft',type=Path,help='Launcher directory containing versions/')
     args = parser.parse_args()
+    GAME=game_path(args.game) if args.action=='host' else args.game
+    MINECRAFT=minecraft_path(args.minecraft) if args.action=='guest' else args.minecraft
     receipt = json.loads(RECEIPT.read_text(encoding='utf-8')) if RECEIPT.exists() else {}
     {'host':host, 'guest':guest, 'uninstall':uninstall}[args.action](receipt)

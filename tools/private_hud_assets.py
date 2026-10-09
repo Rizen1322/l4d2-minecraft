@@ -4,10 +4,14 @@ Generated assets stay in ignored dist/, never in the repository.
 """
 from pathlib import Path
 import struct
+import argparse
+import sys
 from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[1]
-GAME=Path(r'E:\SteamLibrary\steamapps\common\Left 4 Dead 2')
+sys.path.insert(0,str(ROOT/'passthrough'))
+from runtime_paths import game_path
+GAME=None
 PORTRAITS={'coach':'coach','ellis':'mechanic','nick':'gambler','rochelle':'producer',
            'bill':'namvet','zoey':'teenangst','francis':'biker','louis':'manager'}
 
@@ -66,6 +70,7 @@ def decode_vtf(data):
 
 
 def build(game=GAME):
+    game=game_path(game)
     names={f'materials/vgui/s_panel_{value}.vtf' for value in PORTRAITS.values()}
     data=extract(game/'left4dead2/pak01_dir.vpk',names)
     destination=ROOT/'dist/l4d2mc_hud_assets/assets/passthrough/textures/gui/teammates'
@@ -76,4 +81,6 @@ def build(game=GAME):
     print('Eight private teammate portraits generated from installed game.')
 
 
-if __name__=='__main__':build()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--game',type=Path,default=GAME)
+    build(parser.parse_args().game)
