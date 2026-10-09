@@ -54,7 +54,7 @@ def build(game=GAME):
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeaponSelection',{'xpos':3000,'visible':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeapon',{'visible':0,'enabled':0,'wide':0,'tall':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'CHudTeamDisplay',
-                                            {'xpos':hud_layout.X,'ypos':f'r{hud_layout.BOTTOM}','wide':116,'tall':hud_layout.BOTTOM})
+                                            {'xpos':3000,'ypos':f'r{hud_layout.BOTTOM}','wide':0,'tall':0,'visible':0,'enabled':0})
     for name in ('teamdisplayhud','teamdisplayhud_vertical'):
         key=f'resource/ui/hud/{name}.res'
         for i in range(1,5):

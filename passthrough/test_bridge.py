@@ -100,6 +100,9 @@ class CameraTests(unittest.TestCase):
         sample.update(pin='unknown',teammates=20)
         pose=camera(sample,16/9)
         self.assertEqual(pose['pin'],'none');self.assertEqual(pose['teammates'],3)
+        sample['teamhud']=[{'name':'Ellis','character':'ellis','hp':75,'temp':10,'max':100,'incap':False,'dead':False}]
+        self.assertEqual(camera(sample,16/9)['teamhud'],sample['teamhud'])
+        sample.pop('teamhud');self.assertEqual(camera(sample,16/9)['teamhud'],[])
 
     def test_cutscene_visibility_survives_camera_conversion(self):
         sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"visible":False}

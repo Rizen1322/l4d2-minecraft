@@ -10,7 +10,7 @@ def update(game=GAME):
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
            (ROOT/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
     files += [(ROOT/'passthrough/shaders'/name,game/'bin/l4d2mc/shaders'/name)
-              for name in ('L4D2Minecraft.fx','TeamHud.fxh')]
+              for name in ('TeamHud.fxh','L4D2Minecraft.fx')]
     files += [(ROOT/'passthrough/host'/name,game/'left4dead2/scripts/vscripts'/name)
               for name in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut')]
     pending=[]

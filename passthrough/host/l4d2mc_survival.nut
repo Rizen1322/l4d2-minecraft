@@ -16,6 +16,52 @@ if(!("fireZones" in L4D2MCBridge.survival)) {
 if(!("totemPending" in L4D2MCBridge.survival)) {
     L4D2MCBridge.survival.totemPending<-null;L4D2MCBridge.survival.totemHeld<-false;L4D2MCBridge.survival.totemAt<- -100.0;
 }
+if(!("totemGround" in L4D2MCBridge.survival)) {
+    L4D2MCBridge.survival.totemGround<-null;L4D2MCBridge.survival.totemGroundAt<-0.0;
+    L4D2MCBridge.survival.totemDamageType<-0;L4D2MCBridge.survival.totemDamageAt<- -100.0;
+    L4D2MCBridge.survival.totemWorldHurt<-false;L4D2MCBridge.survival.totemFallingAt<- -100.0;
+}
+L4D2MCBridge.TotemResetMotion <- function(player) {
+    // Native setter also invalidates cached absolute velocity used by movement.
+    player.SetVelocity(Vector(0,0,0));
+    foreach(prop in ["m_vecVelocity","m_vecBaseVelocity"])
+        if(NetProps.HasProp(player,prop))NetProps.SetPropVector(player,prop,Vector(0,0,0));
+    foreach(prop in ["m_flFallVelocity","m_Local.m_flFallVelocity"])
+        if(NetProps.HasProp(player,prop))NetProps.SetPropFloat(player,prop,0.0);
+};
+L4D2MCBridge.TotemHazard <- function(player,p) {
+    local e=null,count=0;
+    while((e=Entities.FindByClassname(e,"trigger_hurt"))!=null && count++<256) {
+        if(NetProps.HasProp(e,"m_bDisabled") && NetProps.GetPropInt(e,"m_bDisabled")!=0)continue;
+        if(!NetProps.HasProp(e,"m_Collision.m_vecMins") || !NetProps.HasProp(e,"m_Collision.m_vecMaxs"))continue;
+        local at=e.GetOrigin(),lo=at+NetProps.GetPropVector(e,"m_Collision.m_vecMins"),hi=at+NetProps.GetPropVector(e,"m_Collision.m_vecMaxs");
+        // Standing survivor hull, conservatively expanded rather than testing feet only.
+        if(p.x+16>lo.x && p.x-16<hi.x && p.y+16>lo.y && p.y-16<hi.y && p.z+72>lo.z && p.z<hi.z)return true;
+    }
+    return false;
+};
+L4D2MCBridge.TotemFloor <- function(player,p) {
+    if(TotemHazard(player,p))return false;
+    local t={start=p+Vector(0,0,4),end=p-Vector(0,0,24),ignore=player,mask=33570827};TraceLine(t);
+    return WalkableFloor(t,player);
+};
+L4D2MCBridge.TotemTrackGround <- function(player) {
+    if(player.IsDead() || player.IsIncapacitated() || player.IsHangingFromLedge())return;
+    local velocity=player.GetVelocity();if(velocity.z< -400)survival.totemFallingAt=Time();
+    if(Time()<survival.totemGroundAt)return;survival.totemGroundAt=Time()+0.2;
+    if(!NetProps.HasProp(player,"m_fFlags") || (NetProps.GetPropInt(player,"m_fFlags")&1)==0 || abs(velocity.z)>64)return;
+    local p=player.GetOrigin();if(!TotemFloor(player,p))return;
+    survival.totemGround={entity=player,epoch=epoch,pos=Vector(p.x,p.y,p.z),at=Time()};
+};
+L4D2MCBridge.TotemDamage <- function(player,event) {
+    if(player==null || player!=survival.player)return;
+    survival.totemDamageType="type" in event?event.type:0;survival.totemDamageAt=Time();survival.totemWorldHurt=false;
+    if("attackerentid" in event && event.attackerentid>0) {
+        local e=EntIndexToHScript(event.attackerentid);
+        survival.totemWorldHurt=e!=null && e.IsValid() && e.GetClassname()=="trigger_hurt";
+    }
+    if(TotemPendingFor(player) && ((survival.totemDamageType&32)!=0 || survival.totemWorldHurt))survival.totemPending.fall=true;
+};
 L4D2MCBridge.TotemPendingFor <- function(player) {
     local v=survival.totemPending;
     return v!=null && v.entity==player && player.IsValid() && Time()-v.at<30;
@@ -30,27 +76,51 @@ L4D2MCBridge.TotemRequest <- function(player) {
     if(!player.IsDead() && player.GetHealth()>0 && !player.IsIncapacitated())return;
     if(!player.IsDead() && player.IsHangingFromLedge())return;
     survival.replySerial++;
-    survival.totemPending={entity=player,key=format("totem_%d_%d_%d",epoch,player.GetEntityIndex(),survival.replySerial),at=Time(),next=0.0};
+    local fall=(Time()-survival.totemDamageAt<1 && ((survival.totemDamageType&32)!=0 || survival.totemWorldHurt)) || Time()-survival.totemFallingAt<1;
+    survival.totemPending={entity=player,key=format("totem_%d_%d_%d",epoch,player.GetEntityIndex(),survival.replySerial),at=Time(),next=0.0,fall=fall,applied=false,confirmAt=0.0,recoveries=0};
     TotemTick(player);
 };
 L4D2MCBridge.TotemTick <- function(player) {
     if(!TotemPendingFor(player)) {if(survival.totemPending!=null && Time()-survival.totemPending.at>=30)survival.totemPending=null;return;}
-    local v=survival.totemPending;if(Time()<v.next)return;v.next=Time()+0.5;
+    local v=survival.totemPending;
+    if(v.applied) {
+        if(Time()<v.confirmAt)return;
+        if(player.IsDead() || player.IsIncapacitated() || player.GetHealth()<=0) {
+            // A kill-volume/landing can run after native revival in the same
+            // frame. One bounded fallback reuses the already consumed receipt.
+            if(v.fall && v.recoveries<1) {v.applied=false;v.recoveries++;TotemResult(["event","0","totemresult",v.key,"1"],player);}
+            return;
+        }
+        local key=v.key;survival.totemPending=null;survival.totemHeld=false;
+        Reply("\"t\":\"totemapplied\",\"key\":\""+key+"\"");
+        printl("[L4D2MC TOTEM] confirmed "+key);return;
+    }
+    if(Time()<v.next)return;v.next=Time()+0.5;
     Reply("\"t\":\"totemrequest\",\"key\":\""+v.key+"\"");
 };
 L4D2MCBridge.TotemResult <- function(f,player) {
     if(f.len()!=5 || !TotemPendingFor(player) || f[3]!=survival.totemPending.key)return;
     local used=Integer(f[4]);if(used>1)return;
     if(used==0){survival.totemPending=null;survival.totemHeld=false;return;}
+    local v=survival.totemPending;if(v.applied)return;
+    TotemResetMotion(player);
     // Native CTerrorPlayer no-argument bindings, not a generic entity respawn.
     if(player.IsDead())player.ReviveByDefib();
     else if(player.IsIncapacitated())player.ReviveFromIncap();
     if(player.IsDead() || player.IsIncapacitated())return;
+    TotemResetMotion(player);
+    if(v.fall) {
+        local safe=survival.totemGround,recovered=false;
+        if(v.recoveries==0 && TotemFloor(player,player.GetOrigin()))recovered=TeleportPlayer(player,player.GetOrigin(),false,true);
+        if(!recovered && safe!=null && safe.entity==player && safe.epoch==epoch && Time()-safe.at<=20
+            && !TotemHazard(player,safe.pos))recovered=TeleportPlayer(player,safe.pos,false,true);
+        if(!recovered){printl("[L4D2MC TOTEM] no safe native fall floor for "+v.key);return;}
+        TotemResetMotion(player);
+    }
     player.SetHealth(100);
     if(NetProps.HasProp(player,"m_healthBuffer"))NetProps.SetPropFloat(player,"m_healthBuffer",0.0);
     if(player.GetHealth()!=100)return;
-    local key=survival.totemPending.key;survival.totemPending=null;survival.totemHeld=false;
-    Reply("\"t\":\"totemapplied\",\"key\":\""+key+"\"");
+    v.applied=true;v.confirmAt=Time()+0.12;
 };
 L4D2MCBridge.ShieldAvailable <- function(){return Time()>=survival.shieldCooldown && survival.shieldCharge>0;};
 L4D2MCBridge.ShieldSpend <- function(e) {
@@ -266,6 +336,7 @@ L4D2MCBridge.SurvivalCleanup <- function() {
     survival.nextShield=0.0;survival.nextIgnite=0.0;survival.nextAggro=0.0;
     survival.nextPressure=0.0;survival.pressureIndex=0;
     survival.fireZones.clear();survival.fireActors.clear();survival.nextFire=0.0;
+    survival.totemGround=null;survival.totemGroundAt=0.0;survival.totemDamageAt=-100.0;survival.totemFallingAt=-100.0;
     if("swordAt" in survival)delete survival.swordAt;
     if("dropLatch" in survival)survival.dropLatch=false;
 };
@@ -371,6 +442,7 @@ L4D2MCBridge.ConvertPickups <- function(player) {
 };
 L4D2MCBridge.SurvivalTick <- function(player) {
     ConvertPickups(player);
+    TotemTrackGround(player);
     TotemRequest(player);TotemTick(player);
     FireTick(player);
     if(survival.guestBurn && Time()-survival.effectsAt<0.75 && Time()>=survival.nextBurn) {
@@ -443,8 +515,9 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
         },
         OnGameEvent_player_hurt=function(event) {
             if(!("L4D2MCBridge" in getroottable()))return;
-            local b=L4D2MCBridge;if(Time()-b.survival.hookLiveAt<0.1 || !b.GameplayLease())return;
-            local p=GetPlayerFromUserID(event.userid);b.TotemRequest(p);if(p==null || p!=b.survival.player || p.IsIncapacitated() || p.GetHealth()<=0)return;
+            local b=L4D2MCBridge;if(!b.GameplayLease())return;
+            local p=GetPlayerFromUserID(event.userid);b.TotemDamage(p,event);b.TotemRequest(p);
+            if(Time()-b.survival.hookLiveAt<0.1 || p==null || p!=b.survival.player || p.IsIncapacitated() || p.GetHealth()<=0)return;
             local from=null;
             if("attackerentid" in event && event.attackerentid>0)from=EntIndexToHScript(event.attackerentid);
             if(from==null && "attacker" in event && event.attacker>0)from=GetPlayerFromUserID(event.attacker);

@@ -56,7 +56,6 @@ namespace
 	DWORD g_nextOpenAttempt = 0;
 	ULONGLONG g_lastNewFrame = 0;
 	bool g_guestUiOpen = false;
-    uint32_t g_teammates = 0;
     bool g_guestInputAlive=false;
     bool g_sceneVisible=false;
     uint32_t g_movementHeld=0;
@@ -413,8 +412,6 @@ namespace
 		// Minecraft frame is here. (Toggling techniques from inside this callback crashes ReShade.)
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McActive"); v.handle != 0)
 			runtime->set_uniform_value_bool(v, on);
-        if (const auto v=find_uniform(runtime,kEffect,"TeammateHudCount");v.handle)
-            runtime->set_uniform_value_int(v,on && !g_guestUiOpen?int(g_teammates):0);
         if (const auto v=find_uniform(runtime,kEffect,"DebugView");v.handle) runtime->set_uniform_value_int(v,g_debugMode<=3?int(g_debugMode):0);
         if (const auto v=find_uniform(runtime,kEffect,"HostOcclusion");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=4);
         if (const auto v=find_uniform(runtime,kEffect,"Reproject");v.handle) runtime->set_uniform_value_bool(v,g_debugMode!=5);
@@ -519,7 +516,6 @@ namespace
 		const uint32_t held = read<uint32_t>(view + 80) & 127, debug = read<uint32_t>(view + 68);
 		const bool sceneVisible = read<uint32_t>(view + 84) != 0;
 		const uint64_t scene = read<uint64_t>(view + 88);
-        const uint32_t teammates = read<uint32_t>(view + 96);
 		const double x = read<double>(view+16), y = read<double>(view+24), z = read<double>(view+32);
 		const float yaw = read<float>(view+40), pitch = read<float>(view+44), roll = read<float>(view+48), fov = read<float>(view+52);
 		MemoryBarrier();
@@ -527,7 +523,6 @@ namespace
 		lastInputAccepted=inputStamp;
 		g_guestInputAlive=inputStamp>0 && now>=inputStamp && now-inputStamp<1000;
 		g_guestUiOpen=uiOpen;g_movementHeld=held;g_sceneVisible=sceneVisible;g_debugMode=debug;
-        g_teammates=teammates<=3?teammates:0;
 		if (scene != g_hostScene) { g_hasFrame=false;g_hostScene=scene; }
 		const bool fresh = GetTickCount64() >= timestamp && GetTickCount64() - timestamp < 500;
 		compositor::set_active(fresh);

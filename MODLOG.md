@@ -375,3 +375,21 @@ launcher legacy process guard+mutex, single WScontroller lock+generation,
 nonowner message rejection, and idempotent native resize (no RestoreWindow,
 duplicate SDLSetWindowSize/SyncWindow). Build47Python/4pureJVM/Squirrel arithmetic
 and syntax/PSparse pass; runtime crash disappearance/Mixin behavior unverified.
+
+2026-10-09 connection/HUD/use/fall-totem repair:
+Transport was connected; ReShade failed to compile the previous HUD cutout loop.
+Compile recovery confirmed by native log and user's visible picture. Replaced
+rectangular native framebuffer restoration with guest GUI alpha teammate cards
+above the full shield, Source member state export and eight privately extracted
+portraits in ignored dist. Native team HUD disabled by own addon. No world-depth
+or reprojection change. Checkpoint readback uses LevelResource.PLAYER_DATA_DIR
+(players/data in26.3). Native use now sends real client +use/-use with own key32766,
+release/hold/carry/GUI guards; no commands issued to running game during work.
+Fall rescue resets native momentum/fall accumulator, validates final snapped
+floor/hazard for every candidate, restores recent same-scene safe anchor, and
+confirms after physics with one bounded retry. Mirrored guest FALL/void suppressed
+only under fresh Source health authority. Review caught unsafe final floor snap;
+regressions now reject vanished-platform hurt destinations and steep slopes.
+Build passed63Python,12JVM programs,7actual Source suites and x86 PE verification.
+Nine owned components installed and SHA verified. Games not opened or controlled;
+new HUD, door and fall rescue remain runtime unverified, restart required.

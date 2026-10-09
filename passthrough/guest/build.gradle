@@ -23,6 +23,10 @@ loom {
 	}
 }
 
+// Registered after Loom creates its split client source set.
+// Private portraits stay in ignored dist/; no game assets are checked into Git.
+sourceSets.client.resources.srcDir('../../dist/l4d2mc_hud_assets')
+
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
@@ -97,6 +101,13 @@ tasks.register('verifyAvatarPosePolicy', JavaExec) {
     mainClass = 'dev.rehan.passthrough.AvatarPosePolicyTest'
 }
 check.dependsOn verifyAvatarPosePolicy
+
+tasks.register('verifyTeamHudPolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.TeamHudPolicyTest'
+}
+check.dependsOn verifyTeamHudPolicy
 
 tasks.register('verifyEquipmentWearPolicy', JavaExec) {
     dependsOn testClasses

@@ -90,6 +90,42 @@ L4D2MCBridge.SyncCollision <- function() {
         if (block != null) { blocks[key] <- block; ++count; }
     }
 };
+// Dedicated alpha HUD state; never scrape rectangles from the rendered world.
+L4D2MCBridge.HudJsonString <- function(value) {
+    local out="\"";
+    foreach(ch in value) {
+        if(ch==34)out+="\\\"";
+        else if(ch==92)out+="\\\\";
+        else if(ch<32)out+=" ";
+        else out+=format("%c",ch);
+    }
+    return out+"\"";
+};
+L4D2MCBridge.TeamHudJson <- function(player) {
+    local out="[",count=0,e=null;
+    while((e=Entities.FindByClassname(e,"player"))!=null && count<3) {
+        if(e==player || !e.IsSurvivor())continue;
+        local character="coach",model=e.GetModelName();
+        foreach(pair in [["coach","coach"],["mechanic","ellis"],["gambler","nick"],["producer","rochelle"],
+                         ["namvet","bill"],["teenangst","zoey"],["biker","francis"],["manager","louis"]])
+            if(model.find(pair[0])!=null){character=pair[1];break;}
+        local name=character;try{name=e.GetPlayerName();}catch(error){}
+        local dead=e.IsDead(),incap=e.IsIncapacitated(),hp=e.GetHealth();
+        local maxHp=NetProps.HasProp(e,"m_iMaxHealth")?NetProps.GetPropInt(e,"m_iMaxHealth"):100;
+        if(incap) {local value=Convars.GetFloat("survivor_incap_health");maxHp=value!=null && value>0?value.tointeger():300;}
+        if(maxHp<1)maxHp=100;
+        local temp=NetProps.HasProp(e,"m_healthBuffer")?NetProps.GetPropFloat(e,"m_healthBuffer"):0.0;
+        if(NetProps.HasProp(e,"m_healthBufferTime")) {
+            local decay=Convars.GetFloat("pain_pills_decay_rate");
+            if(decay!=null)temp-=(Time()-NetProps.GetPropFloat(e,"m_healthBufferTime"))*decay;
+        }
+        if(temp<0 || dead || incap)temp=0;
+        if(dead)hp=0;
+        out+=(count++==0?"":",")+format("{\"name\":%s,\"character\":\"%s\",\"hp\":%d,\"temp\":%.3f,\"max\":%d,\"incap\":%s,\"dead\":%s}",
+            HudJsonString(name),character,hp,temp,maxHp,incap?"true":"false",dead?"true":"false");
+    }
+    return out+"]";
+};
 L4D2MCBridge.anchor = SpawnEntityFromTable("info_target", { targetname = "l4d2mc_bridge" });
 L4D2MCBridge.anchor.ValidateScriptScope();
 L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
@@ -172,6 +208,7 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
     data=data.slice(0,data.len()-1)+",\"carrying\":"+(carrying?"true":"false")+"}";
     data=data.slice(0,data.len()-1)+",\"pinned\":"+(pinned?"true":"false")+"}";
     data=data.slice(0,data.len()-1)+format(",\"pin\":\"%s\",\"teammates\":%d}",pin,teammates);
+    data=data.slice(0,data.len()-1)+",\"teamhud\":"+L4D2MCBridge.TeamHudJson(player)+"}";
     data=data.slice(0,data.len()-1)+format(",\"epoch\":%d}",L4D2MCBridge.epoch);
     local maxHp=NetProps.HasProp(player,"m_iMaxHealth")?NetProps.GetPropInt(player,"m_iMaxHealth"):100;
     local temporary=NetProps.HasProp(player,"m_healthBuffer")?NetProps.GetPropFloat(player,"m_healthBuffer"):0.0;

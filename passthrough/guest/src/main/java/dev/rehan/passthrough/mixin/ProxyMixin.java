@@ -19,6 +19,14 @@ abstract class ProxyMixin {
 	@Inject(method = "hurtServer(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/damagesource/DamageSource;F)Z", at = @At("HEAD"), cancellable = true)
 	private void passthrough$proxyHurt(final ServerLevel level, final DamageSource source, final float amount, final CallbackInfoReturnable<Boolean> cir) {
 		LivingEntity self = (LivingEntity) (Object) this;
+		// Replicated Source falls/void damage must not consume a vanilla totem
+		// before L4D2's own lethal event can perform the durable rescue handshake.
+		if(self instanceof net.minecraft.server.level.ServerPlayer player
+		    && dev.rehan.passthrough.SurvivalFeatures.hostOwnsHealth(player)
+		    && (source.is(net.minecraft.tags.DamageTypeTags.IS_FALL)
+		        || source.is(net.minecraft.world.damagesource.DamageTypes.FELL_OUT_OF_WORLD))) {
+		    cir.setReturnValue(false);return;
+		}
 		if (MobWar.isProxy(self)) {
 			MobWar.onProxyHit(self, source, amount);
 			cir.setReturnValue(false);

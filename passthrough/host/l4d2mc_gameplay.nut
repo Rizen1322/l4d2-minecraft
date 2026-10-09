@@ -7,6 +7,16 @@ L4D2MCPreviousGameplay=null;
 if(!("forced" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.forced<-{};
 if(!("nativeUseIntent" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.nativeUseIntent<-false;
 if(!("usePulseUntil" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.usePulseUntil<-0.0;
+if(!("nativeUseDown" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.nativeUseDown<-false;
+if(!("useGapUntil" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.useGapUntil<-0.0;
+L4D2MCBridge.NativeUse <- function(pressed) {
+    if(pressed==gameplay.nativeUseDown)return;
+    // This is the real client command route, including L4D2's selected-use
+    // entity/usercmd processing. A server forced-button bit alone is insufficient.
+    // Own key id avoids releasing somebody else's physical +use bind.
+    SendToConsole(pressed?"+use 32766":"-use 32766");
+    gameplay.nativeUseDown=pressed;
+};
 L4D2MCBridge.Number <- function(token,limit=32768.0) {
     if(token.len()==0 || token.len()>32)throw "invalid number";
     for(local i=0;i<token.len();i++)if("0123456789-+.eE".find(token.slice(i,i+1))==null)throw "invalid numeric token";
@@ -69,7 +79,7 @@ L4D2MCBridge.HidePlayerWeapons <- function(player) {
     foreach(id in restore)RestoreHidden(id);
 };
 L4D2MCBridge.RestoreAppearance <- function() {
-    gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;
+    NativeUse(false);gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;
     if("SurvivalCleanup" in this)SurvivalCleanup();
     local hiddenIds=[];foreach(id,v in gameplay.hidden)hiddenIds.append(id);
     foreach(id in hiddenIds)RestoreHidden(id);
@@ -179,25 +189,27 @@ L4D2MCBridge.CarryItem <- function(kind) {
     return kind=="weapon_gascan" || kind=="weapon_cola_bottles" || kind=="weapon_gnome" || kind=="weapon_fireworkcrate" || kind.find("weapon_upgradepack_")==0;
 };
 L4D2MCBridge.HeldActions <- function(player,attack,use,gui) {
-    if(!NetProps.HasProp(player,"m_afButtonForced"))return;
-    local id=player.GetEntityIndex(),flags=NetProps.GetPropInt(player,"m_afButtonForced");
-    if(!(id in gameplay.forced) || gameplay.forced[id].entity!=player)gameplay.forced[id]<-{entity=player,old=flags&33};
-    local wanted=0;
     if(!use && "dropLatch" in survival)survival.dropLatch=false;
-    local weapon=NetProps.GetPropEntity(player,"m_hActiveWeapon"),kind=weapon!=null?weapon.GetClassname():"";
+    local weapon=player.GetActiveWeapon(),kind=weapon!=null?weapon.GetClassname():"";
     local carry=CarryItem(kind);
     // Checkpoint doors use their native survivor use logic to remove the bar
     // before opening. Toggle/Press inputs bypass that first stage and map outputs.
     // Only an explicit guest native-use edge owns this hold. MC mob/item clicks
     // must not open a Source door behind their non-solid Minecraft target.
-    if(gui){gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;}
+    if(gui){gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;}
     local nativeUse=(use && gameplay.nativeUseIntent) || Time()<gameplay.usePulseUntil;
     if(!use)gameplay.nativeUseIntent=false;
-    if(!gui && nativeUse && !("dropLatch" in survival && survival.dropLatch) && (Usable(player) || carry))wanted=wanted|32;
+    NativeUse(!gui && nativeUse && Time()>=gameplay.useGapUntil && !("dropLatch" in survival && survival.dropLatch) && (Usable(player) || carry));
+    // Carry-item attack still owns only IN_ATTACK in the server fallback; USE
+    // above must work even if this retail datamap property is unavailable.
+    if(!NetProps.HasProp(player,"m_afButtonForced"))return;
+    local id=player.GetEntityIndex(),flags=NetProps.GetPropInt(player,"m_afButtonForced");
+    if(!(id in gameplay.forced) || gameplay.forced[id].entity!=player)gameplay.forced[id]<-{entity=player,old=flags&33};
+    local wanted=0;
     if(!gui && attack && carry)wanted=wanted|1; // IN_ATTACK only for map carry/use items, never hidden guns.
     NetProps.SetPropInt(player,"m_afButtonForced",(flags&(~33))|gameplay.forced[id].old|wanted);
 };
-L4D2MCBridge.TeleportPlayer <- function(player,requested,random=false) {
+L4D2MCBridge.TeleportPlayer <- function(player,requested,random=false,safeFloor=false) {
     if(player.IsDead() || player.IsIncapacitated() || player.IsHangingFromLedge())return false;
     if(!random && (requested-player.GetOrigin()).Length()>4096)return false;
     local lo=NetProps.GetPropVector(player,"m_Collision.m_vecMins"),hi=NetProps.GetPropVector(player,"m_Collision.m_vecMaxs");
@@ -208,6 +220,9 @@ L4D2MCBridge.TeleportPlayer <- function(player,requested,random=false) {
         local floor={start=p+Vector(0,0,32),end=p-Vector(0,0,256),ignore=player,mask=33570827};TraceLine(floor);
         if(!("hit" in floor) || !floor.hit || ("startsolid" in floor && floor.startsolid))continue;
         p=Vector(p.x,p.y,floor.pos.z+1);
+        // Rescue candidates may move after an anchor/platform changes. Validate
+        // the final floor and hull location, including every fallback offset.
+        if(safeFloor && (!WalkableFloor(floor,player) || TotemHazard(player,p)))continue;
         local clear=true;
         // This retail VScript has no TraceHull. Check the standing hull with
         // central/corner vertical rays and horizontal cross sections instead.
@@ -337,12 +352,18 @@ L4D2MCBridge.Event <- function(fields,player) {
         local held=player.GetActiveWeapon();
         if(held!=null && (CarryItem(held.GetClassname()) || held.GetClassname()=="weapon_melee")) {
             player.DropItem(held.GetClassname());survival.dropLatch<-true;
-            gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;return;
+            NativeUse(false);gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;return;
         }
         // HeldActions forwards the actual IN_USE press/hold. Never force an
         // entity input: locked doors, checkpoint bars and button events belong
         // to the campaign's use implementation.
-        if(Usable(player)) {gameplay.nativeUseIntent=true;gameplay.usePulseUntil=Time()+0.12;}
+        if(Usable(player)) {
+            // A second quick click needs an actual released usercmd between
+            // presses (e.g. remove checkpoint bar, then open the same door).
+            local again=gameplay.nativeUseDown;NativeUse(false);
+            gameplay.useGapUntil=again?Time()+0.04:Time();
+            gameplay.nativeUseIntent=true;gameplay.usePulseUntil=gameplay.useGapUntil+0.12;
+        }
     } else throw "invalid event";
 };
 L4D2MCBridge.Projectile <- function(fields,player) {
@@ -531,6 +552,7 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     if(header.len()!=9 || !CompleteMailbox(lines,header[3]))return GameplayLease();
     if(header[1]!=Director.GetMapName() || header[8]!=epoch.tostring())return false;
     if(header[2]=="0" && TotemPendingFor(player)) {
+        NativeUse(false);gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;
         if(header[0]!=gameplay.generation){gameplay.generation=header[0];gameplay.lastEvent=0;gameplay.content=null;gameplay.armed=false;}
         // A spectating/dead frame permits only the existing durable rescue.
         for(local i=1;i<lines.len()-1;i++) {

@@ -4,7 +4,6 @@
 // world: premultiplied RGBA, drawn where Minecraft is nearer than L4D2's depth buffer (both in metres).
 // overlay: Minecraft's hand, HUD and screens, always on top.
 #include "ReShade.fxh"
-#include "TeamHud.fxh"
 
 texture MCWorldTex : MCWORLD;
 texture MCDepthTex : MCDEPTH;
@@ -324,11 +323,6 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 {
 	if (!McActive)
 		return tex2D(ReShade::BackBuffer, uv).rgb;
-	// Native compact teammate cards own these screen-space footprints. Restore
-	// the original Source picture before MC hand/fire/world overlays and shake.
-	// The add-on disables this reservation while a Minecraft GUI is open.
-	if (nativeTeamHud(pos.xy))
-		return tex2D(ReShade::BackBuffer, uv).rgb;
 	const float aspect = BUFFER_WIDTH * BUFFER_RCP_HEIGHT;
 	const float t = Timer * 0.001;
 	// shake: rotate and move the picture a little, zoomed in just enough that no edge shows
@@ -398,6 +392,7 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 		color = lerp(color, purple, saturate(PortalWarp * (0.55 + r * 0.6)));
 	}
 	const float4 overlay = tex2D(sOverlay, float2(uv.x, 1.0 - uv.y)); // hand and HUD are screen-space: never shaken
+	// Guest GUI now draws teammate cards with true alpha above its shield/hand.
 	return overlay.rgb + saturate(color) * (1.0 - overlay.a);
 }
 

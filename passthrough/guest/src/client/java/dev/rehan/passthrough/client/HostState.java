@@ -20,7 +20,8 @@ public final class HostState {
 	public record Pose(
 		long hostFrame, double x, double y, double z, float yaw, float pitch, float roll, float fov,
 		boolean firstPerson, double px, double py, double pz, float bodyYaw, long receivedNanos,
-		boolean drive, float lookYaw, float lookPitch, boolean gun, long scene, String pin
+		boolean drive, float lookYaw, float lookPitch, boolean gun, long scene, String pin,
+        java.util.List<dev.rehan.passthrough.TeamHudPolicy.Member> teamHud
 	) {
 	}
 
@@ -58,6 +59,17 @@ public final class HostState {
 
 	/** {"t":"cam","f":frame,"p":[x,y,z],"r":[yaw,pitch,roll],"fov":deg,"fp":bool,"pl":[x,y,z],"h":bodyYaw} */
 	static void update(final JsonObject m) {
+        var team=new java.util.ArrayList<dev.rehan.passthrough.TeamHudPolicy.Member>();
+        if(m.has("teamhud") && m.get("teamhud").isJsonArray())for(var row:m.getAsJsonArray("teamhud")){
+            if(team.size()>=3)break;
+            if(!row.isJsonObject())continue;
+            var member=row.getAsJsonObject();
+            try{team.add(new dev.rehan.passthrough.TeamHudPolicy.Member(
+                member.get("name").getAsString(),member.get("character").getAsString(),
+                member.get("hp").getAsFloat(),member.get("temp").getAsFloat(),member.get("max").getAsFloat(),
+                member.get("incap").getAsBoolean(),member.get("dead").getAsBoolean()));}
+            catch(RuntimeException ignored){} // A missing teammate row cannot interrupt camera updates.
+        }
         burning=m.has("burning") && m.get("burning").getAsBoolean();
         nativeUse=m.has("nativeuse") && m.get("nativeuse").getAsBoolean();
         visible=!m.has("visible") || m.get("visible").getAsBoolean();
@@ -82,7 +94,8 @@ public final class HostState {
 			m.has("look") ? m.getAsJsonArray("look").get(1).getAsFloat() : r.get(1).getAsFloat(),
 			m.has("gun") && m.get("gun").getAsBoolean(),
             m.has("scene")?m.get("scene").getAsLong():0,
-            m.has("pin")?m.get("pin").getAsString():"none"
+            m.has("pin")?m.get("pin").getAsString():"none",
+            java.util.List.copyOf(team)
 		);
 	}
 

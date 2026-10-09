@@ -363,7 +363,7 @@ def camera(sample, aspect):
     vfov = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) / (4 / 3)))
     pin=sample.get('pin','none')
     if pin not in ('none','hunter','jockey','smoker','charger'):pin='none'
-    return {"t": "cam", "pin":pin,"teammates":max(0,min(3,int(sample.get('teammates',0)))), "f": int(sample["f"]), "p": position(sample["p"]),
+    return {"t": "cam", "pin":pin,"teamhud":sample.get('teamhud',[])[:3],"teammates":max(0,min(3,int(sample.get('teammates',0)))), "f": int(sample["f"]), "p": position(sample["p"]),
             "pl": position(sample["feet"]), "r": [-yaw - 90, pitch, -roll],
             "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"carrying":bool(sample.get("carrying",False)),"burning":bool(sample.get("burning",False)),"sneak":bool(sample.get("buttons",0)&4)}
 

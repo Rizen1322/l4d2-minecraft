@@ -21,8 +21,15 @@ public final class SurvivalFeatures {
     private static long lastIgnition;
     private static long burnUntil;
     private static volatile boolean guestBurning;
+    private static volatile long healthAt,healthScene;
+    private static volatile java.util.UUID healthPlayer;
+    public static boolean hostOwnsHealth(ServerPlayer p){
+        return Passthrough.active && MapBuilds.ready && healthPlayer!=null && healthPlayer.equals(p.getUUID())
+            && healthScene==MapBuilds.scene() && System.nanoTime()-healthAt<2_000_000_000L
+            && p.level().getServer()==WorldBridge.server();
+    }
     public static boolean burning(){return guestBurning;}
-    public static void resetEnvironment(){burnUntil=0;guestBurning=false;lastIgnition=0;GuestFire.reset();}
+    public static void resetEnvironment(){burnUntil=0;guestBurning=false;lastIgnition=0;healthAt=0;healthPlayer=null;GuestFire.reset();}
     private static java.util.UUID burnPlayer;
     public static void register(){
         CommandRegistrationCallback.EVENT.register((dispatcher,access,environment)-> {
@@ -110,6 +117,7 @@ public final class SurvivalFeatures {
         MinecraftServer s=WorldBridge.server();if(s==null)return;
         WorldBridge.serverWork(s,()->{if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
             ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
+            healthPlayer=p.getUUID();healthScene=MapBuilds.scene();healthAt=System.nanoTime();
             p.setHealth(GuestMessages.health(hp,maximum,incap));
             p.setAbsorptionAmount(incap?0:(float)Math.clamp(temporary/maximum*20,0,20));
         });

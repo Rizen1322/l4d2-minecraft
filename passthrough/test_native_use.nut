@@ -11,32 +11,55 @@ local melee={GetClassname=function(){return "weapon_melee";}};
 local p={flags=64,weapon=null,drops=0,
     GetEntityIndex=function(){return 1;},EyePosition=function(){return Vec();},
     EyeAngles=function(){return {Forward=function(){return Vec();}};},
-    GetActiveWeapon=function(){return weapon;},DropItem=function(kind){drops++;weapon=null;}
+    GetActiveWeapon=function(){return weapon;},DropItem=function(kind){drops++;weapon=null;},IsValid=function(){return true;}
 };
+local hasForced=false;
 ::NetProps<-{
-    HasProp=function(e,k){return true;},GetPropInt=function(e,k){return e.flags;},
+    HasProp=function(e,k){return k!="m_afButtonForced" || hasForced;},GetPropInt=function(e,k){return e.flags;},
     SetPropInt=function(e,k,v){e.flags=v;},GetPropEntity=function(e,k){return e.weapon;}
 };
 ::EntFire<-function(...){throw "Native checkpoint use replaced with forced entity input";};
+local commands=[],useDown=false;
+::SendToConsole<-function(command){
+    if(command!="+use 32766" && command!="-use 32766")throw "Unexpected/executable native use command";
+    commands.append(command);useDown=command=="+use 32766";
+};
 local b=L4D2MCBridge;b.survival<-{};
 b.Raycast=function(...){return {enthit=door,hit=true};};
 b.HeldActions(p,false,true,false);
-if(p.flags!=64)throw "MC context click leaked IN_USE to door behind mob";
+if(useDown || commands.len()!=0)throw "MC context click leaked IN_USE to door behind mob";
 b.Event(["event","1","interact"],p);
 b.HeldActions(p,false,true,false);
-if(p.flags!=96)throw "Door press did not remain held";
+if(!useDown || commands.len()!=1 || p.flags!=64)throw "Door client press depends on unavailable server forced-button field";
+b.HeldActions(p,false,true,false);
+if(commands.len()!=1)throw "Hold spammed native press instead of one edge";
 now=0.2;b.HeldActions(p,false,false,false);
-if(p.flags!=64)throw "IN_USE stuck after RMB release";
+if(useDown || commands.top()!="-use 32766")throw "IN_USE stuck after RMB release";
 p.weapon=melee;b.Event(["event","2","interact"],p);
 if(p.drops!=1)throw "Hidden starter carry weapon not dropped";
 b.HeldActions(p,false,true,false);
-if(p.flags!=64)throw "Carry drop reused same click for checkpoint stage";
+if(useDown)throw "Carry drop reused same click for checkpoint stage";
 b.HeldActions(p,false,false,false);b.Event(["event","3","interact"],p);b.HeldActions(p,false,true,false);
-if(p.flags!=96)throw "Next RMB press cannot remove checkpoint bar";
+if(!useDown)throw "Next RMB press cannot remove checkpoint bar";
 b.HeldActions(p,false,true,true);
-if(p.flags!=64)throw "Inventory click forwarded to native door";
+if(useDown)throw "Inventory click forwarded to native door";
 b.Event(["event","4","interact"],p);b.HeldActions(p,false,false,false);
-if(p.flags!=96)throw "Quick RMB press+release between mailbox snapshots lost native use";
+if(!useDown)throw "Quick RMB press+release between mailbox snapshots lost native use";
 now=0.4;b.HeldActions(p,false,false,false);
-if(p.flags!=64)throw "Short native use pulse stayed pressed";
+if(useDown)throw "Short native use pulse stayed pressed";
+hasForced=true;
+b.Event(["event","5","interact"],p);b.HeldActions(p,false,true,false);
+if(!useDown || (p.flags&32)!=0)throw "Server forced-use bit still substitutes for real client input";
+now=0.42;b.Event(["event","6","interact"],p);b.HeldActions(p,false,true,false);
+if(useDown)throw "Rapid second click lacked a released usercmd interval";
+now=0.48;b.HeldActions(p,false,true,false);
+if(!useDown)throw "Rapid second click did not re-press native use after gap";
+b.RestoreAppearance();
+if(useDown || b.gameplay.nativeUseIntent || b.gameplay.usePulseUntil!=0)throw "Disconnect/reload cleanup left owned native use pressed";
+b.Event(["event","7","interact"],p);b.HeldActions(p,false,true,false);
+if(!useDown)throw "Dead-path test did not begin with a native hold";
+b.epoch<-123;b.TotemPendingFor<-function(player){return true;};b.TotemTick<-function(player){};
+::Director<-{GetMapName=function(){return "map";}};
+::FileToString<-function(path){return "owner map 0 333 0 0 0 0 123\nend 333 0";};
+if(!b.ReadGameplay(p) || useDown || b.gameplay.nativeUseIntent || b.gameplay.usePulseUntil!=0)throw "Pending dead-player rescue kept native use held";
 print("Native checkpoint press/hold and carry-drop regressions passed\n");

@@ -37,7 +37,7 @@ public final class CampaignRewards {
         // Read back the actual atomic player file before clearing the Source outbox.
         try {
             if(key.startsWith("pickup_") || key.startsWith("totem_"))s.getPlayerList().saveAll();else s.saveEverything(true,true,true);
-            var file=s.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("playerdata").resolve(p.getUUID()+".dat");
+            var file=s.getWorldPath(net.minecraft.world.level.storage.LevelResource.PLAYER_DATA_DIR).resolve(p.getUUID()+".dat");
             var saved=net.minecraft.nbt.NbtIo.readCompressed(file,net.minecraft.nbt.NbtAccounter.create(32L*1024*1024));
             var ledger=RewardLedger.decode(saved.getString("l4d2mcRewards").orElseThrow());
             if(key.startsWith("totem_")) {
