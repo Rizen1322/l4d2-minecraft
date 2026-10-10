@@ -1,4 +1,4 @@
-# One-shot auto setup helper. Finds Steam L4D2, the Minecraft launcher folder and
+﻿# One-shot auto setup helper. Finds Steam L4D2, the Minecraft launcher folder and
 # a JDK, then runs Setup-L4D2MC.ps1 with the toolchains bundled in this checkout.
 # Everything is logged to setup-log.txt and the window stays open on errors.
 param([switch]$CheckOnly)
@@ -190,5 +190,3 @@ finally {
 }
 Read-Host 'Done. Press Enter to close this window'
 exit $exitCode
-
-
