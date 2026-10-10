@@ -179,7 +179,7 @@ sequenceDiagram
     M->>M: Validate and apply once
     M-->>O: Application ACK
     O-->>R: Completed delivery
-    Note over R,M: Retry unacknowledged delivery; suppress duplicate damage
+    Note over R,M: Retry unacknowledged delivery and suppress duplicate damage
 ```
 
 Queues are bounded. Unsent snapshots are replaced by newer snapshots; block edits retain state and deletion history. Discrete room actions wait for application receipts. Network membership has its own lease; a frozen Source frame still stops guest controls instead of being kept alive by fresh network traffic.
