@@ -11,6 +11,7 @@ import json
 import hashlib
 import math
 import mmap
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -18,6 +19,7 @@ import time
 import re
 from combat import GameplayMailbox
 from runtime_paths import game_path
+from coop import CoopLink,RoomPath,RoomSource,load_config
 
 POSE_NAME = r"Local\L4D2MinecraftPose"
 POSE_FORMAT = "<IIQdddffff"
@@ -26,6 +28,7 @@ POSE_SIZE = 128
 MINECRAFT_KEYS = {1:'attack', 2:'use', 4:'pick', 0x45:'inventory',
                   0x51:'drop', 0x46:'swap', 0x74:'perspective',
                   0x54:'chat', 0xBF:'command', 0x78:'inventory',
+                  0x20:'glide',
                   **{0x31+i:f'slot{i}' for i in range(9)}}
 GUI_SCAN = {**{0x41+i:(4+i,97+i) for i in range(26)},
             **{0x31+i:(30+i,49+i) for i in range(9)},0x30:(39,48),
@@ -58,6 +61,8 @@ def relay_keys(pressed, state, *, focused, gui):
                 if down: result.append({'t':'slot','n':int(action[4:])})
             elif action in ('perspective','chat','command'):
                 if down: result.append({'t':'key','k':action,'down':True})
+            elif action=='glide':
+                if down:result.append({'t':'glide','on':True})
             else:
                 result.append({'t':'key','k':action,'down':down})
         state[key] = down
@@ -90,6 +95,28 @@ def scene_token(map_name,epoch):
 def accepts_scene(event,scene):
     # Durable receipts and window state survive map transitions; combat/geometry do not.
     return event.get('t') in ('ui','mapready','pickupack','rewardack','hello') or (scene is not None and event.get('scene')==scene)
+
+async def receive_guest_batch(socket,limit=32,budget=.004):
+    """Drain action bursts without making camera delivery wait for an empty socket."""
+    from websockets.exceptions import ConnectionClosed
+    batch=[];size=0;deadline=time.monotonic()+budget
+    while len(batch)<limit and time.monotonic()<deadline:
+        try:
+            raw=await asyncio.wait_for(socket.recv(),min(.001,max(.00001,deadline-time.monotonic())))
+        except asyncio.TimeoutError:break
+        except ConnectionClosed:
+            if batch:break  # Apply already received actions before reporting disconnect.
+            raise
+        batch.append(raw);size+=len(raw)
+        if size>=2*1024*1024:break
+    return batch
+
+async def send_room_events(room,socket,scene):
+    for event in room.peek_events():
+        if accepts_scene(event,scene):
+            await socket.send(json.dumps(event))
+            room.mark_sent(event)
+        else:room.commit_events([event])
 
 def reset_input_session(inputs,memory,host_input):
     """Release Source ownership now, and reassert held actions after guest attach resets its keys."""
@@ -325,6 +352,12 @@ class FrameHeartbeat:
 
 
 class RenderPose(FrameHeartbeat):
+    def wheel(self):
+        if not self.view:self.read()
+        if not self.view:return None
+        data=ctypes.string_at(self.view,128)
+        if struct.unpack_from('<I',data,124)[0]!=0x4d57484c:return None
+        return struct.unpack_from('<i',data,120)[0]
     def menu_open(self):
         if not self.view:
             self.read()
@@ -391,7 +424,7 @@ def camera(sample, aspect):
     if pin not in ('none','hunter','jockey','smoker','charger'):pin='none'
     return {"t": "cam", "pin":pin,"teamhud":sample.get('teamhud',[])[:3],"teammates":max(0,min(3,int(sample.get('teammates',0)))), "f": int(sample["f"]), "p": position(sample["p"]),
             "pl": position(sample["feet"]), "r": [-yaw - 90, pitch, -roll],
-            "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"carrying":bool(sample.get("carrying",False)),"burning":bool(sample.get("burning",False)),"sneak":bool(sample.get("buttons",0)&4)}
+            "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "grounded":bool(sample.get("grounded",True)), "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"carrying":bool(sample.get("carrying",False)),"burning":bool(sample.get("burning",False)),"sneak":bool(sample.get("buttons",0)&(4|131072))}
 
 
 def surface(sample):
@@ -442,14 +475,88 @@ class PoseMemory:
         struct.pack_into("<I", self.memory, 4, self.sequence)
 
 
+class WheelRelay:
+    def __init__(self):self.counter=None;self.remainder=0
+    def read(self,units,*,enabled,gui):
+        if units is None:self.counter=None;self.remainder=0;return 0
+        before=self.counter;self.counter=units
+        if before is None or not enabled:self.remainder=0;return 0
+        delta=((units-before+2**31)%2**32)-2**31
+        if abs(delta)>12000:self.remainder=0;return 0
+        if gui:self.remainder=0;return delta/120
+        self.remainder+=delta;steps=math.trunc(self.remainder/120);self.remainder-=steps*120
+        return steps
+
+
+class CameraLead:
+    """Render Minecraft where the Source camera will be when the frame is shown.
+
+    The guest frame reaches the screen ~one Minecraft frame plus transport later.
+    Walking or orbiting in third person, the native compositor otherwise has to
+    re-project across that translation, and block edges near the floor break up.
+    The guest reports the pose it actually rendered, so re-projection stays exact;
+    only the leftover translation shrinks. Only the guest copy is led, never the
+    shared host pose the compositor validates against.
+    """
+    def __init__(self,seconds=0.035,limit=1.0):
+        self.seconds,self.limit=seconds,limit
+        self.last=None;self.velocity=[0.0,0.0,0.0]
+    def lead(self,pose,now):
+        p=pose.get('p')
+        if not p or len(p)!=3 or not all(math.isfinite(v) for v in p):return pose
+        if self.last is not None:
+            dt=now-self.last[0]
+            jump=math.dist(p,self.last[1])
+            if 0.004<dt<0.25 and jump<self.limit*4:
+                raw=[(p[i]-self.last[1][i])/dt for i in range(3)]
+                self.velocity=[self.velocity[i]*0.5+raw[i]*0.5 for i in range(3)]
+            elif dt>=0.25 or jump>=self.limit*4:self.velocity=[0.0,0.0,0.0] # teleport, map change or stall
+        self.last=(now,list(p))
+        offset=[v*self.seconds for v in self.velocity]
+        size=math.hypot(*offset)
+        if size>self.limit:offset=[v*self.limit/size for v in offset]
+        if size<1e-4 or pose.get('drive'):return pose
+        led=dict(pose)
+        led['p']=[p[i]+offset[i] for i in range(3)]
+        if isinstance(pose.get('pl'),list) and len(pose['pl'])==3:led['pl']=[pose['pl'][i]+offset[i] for i in range(3)]
+        return led
+
+
+def _camera_lead():
+    # L4D2MC_CAMERA_LEAD seconds (0 disables); see CameraLead.
+    try:return CameraLead(max(0.0,min(0.1,float(os.environ.get('L4D2MC_CAMERA_LEAD','0')))))
+    except ValueError:return CameraLead()
+
+
+camera_lead=_camera_lead()
+
+
+def mouse_pitch(config):
+    """Positive vertical mouse sensitivity from the user's L4D2 config (default 0.022)."""
+    try:
+        match=re.search(r'^m_pitch\s+"?(-?[0-9.]+)',config.read_text(encoding='utf-8-sig',errors='replace'),re.M)
+        value=abs(float(match.group(1))) if match else 0.022
+    except (OSError,ValueError):value=0.022
+    return value if 0<value<1 else 0.022
+
+
 class HostInput:
     def __init__(self, game, play_cfg='', restore_cfg=''):
         self.exe = game / 'left4dead2.exe'
+        self.cfg_dir = game / 'left4dead2' / 'cfg'
         self.disabled = False
         self.perspective = 0
+        self.pitch = mouse_pitch(self.cfg_dir / 'config.cfg')
         self.play_cfg,self.restore_cfg=play_cfg,restore_cfg
         self.controls_enabled=False
         self.next_controls_send=0.0
+        self.native_use_down=False
+
+    def native_use(self,down):
+        if down==self.native_use_down:return
+        # Leading '-' is a launch option, not a Source console command. Keep
+        # press/release in immutable owned cfg files and invoke through +exec.
+        if self._send(['+exec','l4d2mc_use_press' if down else 'l4d2mc_use_release']):self.native_use_down=down
 
     def _window(self):
         user=ctypes.windll.user32
@@ -502,9 +609,17 @@ class HostInput:
 
     def cycle_perspective(self):
         self.perspective=(self.perspective+1)%3
-        commands=['firstperson'] if self.perspective==0 else ['thirdperson',
-            'cam_idealdist 96','cam_ideallag 0','cam_idealpitch 0','cam_idealyaw '+('180' if self.perspective==2 else '0')]
-        self._send([part for command in commands for part in ('+'+command.split()[0],*command.split()[1:])])
+        # Front view (2) behaves like Minecraft's: Steve faces the camera. Source keeps
+        # the camera pitch equal to the aim, so invert m_pitch (mouse-up raises the
+        # camera) and the guest mirrors Steve's head (he looks up at it). Commands go
+        # through an owned cfg file: -hijack argv drops any value starting with '-'.
+        lines=['firstperson',f'm_pitch {self.pitch:.6f}'] if self.perspective==0 else ['thirdperson',
+            'cam_idealdist 96','cam_ideallag 0','cam_idealpitch 0','c_thirdpersonshoulderoffset 0',
+            'c_maxyaw 180','c_minyaw -180','cam_idealyaw '+('180' if self.perspective==2 else '0'),
+            f'm_pitch {(-self.pitch if self.perspective==2 else self.pitch):.6f}']
+        try:(self.cfg_dir/'l4d2mc_view.cfg').write_text('\n'.join(lines)+'\n',encoding='ascii')
+        except OSError:return
+        self._send(['+exec','l4d2mc_view'])
 
     def controls(self,active):
         if active==self.controls_enabled or time.monotonic()<self.next_controls_send:return
@@ -524,9 +639,14 @@ async def transmit(args):
     host_input = HostInput(args.game,args.play_cfg,args.restore_cfg)
     frames = FrameHeartbeat()
     render = RenderPose()
+    config=load_config(args.coop_config)
+    room=CoopLink(config,args.game/'left4dead2/ems',scene_token) if config else None
     try:
-        await connected_loop(args, memory, inputs, host_input, frames, render)
+        if room:await room.start()
+        await connected_loop(args, memory, inputs, host_input, frames, render,room)
     finally:
+        host_input.native_use(False)
+        if room:await room.close()
         host_input.set_gui(False)
         host_input.controls(False)
         memory.memory.close()
@@ -534,19 +654,21 @@ async def transmit(args):
         render.close()
 
 
-async def connected_loop(args, memory, inputs, host_input, frames, render):
+async def connected_loop(args, memory, inputs, host_input, frames, render,room=None):
     import websockets
     sample_path = args.game / "left4dead2/ems/l4d2mc_pose.txt"
-    collision = CollisionSnapshot(sample_path.with_name('l4d2mc_collision.txt'))
-    gameplay = GameplayMailbox(sample_path.with_name('l4d2mc_gameplay.txt'))
-    source=SourceSnapshot(sample_path)
-    rewards=RewardOutbox(sample_path.with_name('l4d2mc_rewards.txt'))
-    pickups=PickupOutbox(sample_path.with_name('l4d2mc_pickups.txt'))
+    collision = CollisionSnapshot(RoomPath(room,'collision') if room else sample_path.with_name('l4d2mc_collision.txt'))
+    joining=bool(room and room.joining)
+    gameplay = GameplayMailbox(RoomPath(room,'gameplay') if joining else sample_path.with_name('l4d2mc_gameplay.txt'))
+    source=RoomSource(room) if joining else SourceSnapshot(sample_path)
+    rewards=RewardOutbox(RoomPath(room,'rewards') if joining else sample_path.with_name('l4d2mc_rewards.txt'))
+    pickups=PickupOutbox(RoomPath(room,'pickups') if joining else sample_path.with_name('l4d2mc_pickups.txt'))
     last_frame = None
     while True:
         try:
+            if room:room.check_task()
             async with websockets.connect("ws://127.0.0.1:25601", max_size=1024*1024) as socket:
-                print("Minecraft guest connected", flush=True)
+                print("Local Minecraft connected to this PC's bridge", flush=True)
                 reset_input_session(inputs,memory,host_input)
                 collision.cells.clear();collision.scene=None
                 await socket.send(json.dumps({'t':'attach'}))
@@ -563,14 +685,17 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                 next_sync = 0.0
                 last_render = None
                 last_wheel = None
+                native_wheel=WheelRelay()
                 last_gameplay = 0.0
                 last_rewards=0.0
+                last_peers=0.0;bootstrap_scene=None
                 guest_map = None
                 map_ready = False
                 last_world_request = 0.0
                 source_updates=SourceUpdateGate()
                 was_host_menu = False
                 while True:
+                    if room:room.check_task()
                     host_fresh = False
                     try:
                         sample=source.read()
@@ -585,7 +710,9 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 gameplay.totem_held=False;gameplay.totem_at=0
                                 sync_after=None;next_sync=0.0;synced=False;sync_id=time.monotonic_ns()
                                 gameplay.events.clear();gameplay.mobs.clear();gameplay.physics.clear();gameplay.projectiles.clear()
+                                gameplay.reply_acks.clear()
                                 gameplay.navigation.clear();gameplay.equipment=None;gameplay.signals=[];gameplay.protection=None
+                                gameplay.flight=None;gameplay.consuming=None
                                 last_frame=None;last_render=None
                                 last_world_request=0.0
                                 last_wheel=None
@@ -600,10 +727,11 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                             pose['scene']=collision.scene
                             pose['visible']=bool(sample.get('visible',True)) and map_ready
                             pose['fp'] = host_input.perspective==0 and not sample.get('pinned',False)
+                            pose['front'] = host_input.perspective==2
                             identity = (sample["map"], sample.get("epoch",0), map_ready, sample["f"], pose.get('render_sequence'))
                             if identity != last_frame:
                                 memory.publish(pose)
-                                await socket.send(json.dumps(pose))
+                                await socket.send(json.dumps(camera_lead.lead(pose,time.monotonic())))
                                 if sync_after is None:
                                     sync_after = time.monotonic() + 0.3
                                 last_frame = identity
@@ -627,11 +755,18 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                         # Guest acknowledges replies after applying them on its server thread.
                                     if 'wheel' in sample:
                                         wheel=sample['wheel']
-                                        if last_wheel is not None and wheel!=last_wheel:
+                                        if render.wheel() is None and last_wheel is not None and wheel!=last_wheel:
                                             await socket.send(json.dumps({'t':'scroll','d':wheel-last_wheel,'scene':collision.scene}))
                                         last_wheel=wheel
                     except (OSError, ValueError, KeyError, TypeError):
                         pass  # VScript file can be observed during its write.
+                    if room and map_ready and host_fresh and time.monotonic()-last_peers>.05:
+                        if room.peers and room.peers.get('scene')==collision.scene:await socket.send(json.dumps(room.peers))
+                        if room.peer_entities and room.peer_entities.get('scene')==collision.scene:await socket.send(json.dumps(room.peer_entities))
+                        if bootstrap_scene!=collision.scene:
+                            await socket.send(json.dumps({'t':'coopbootstrap','scene':collision.scene}));bootstrap_scene=collision.scene
+                        await send_room_events(room,socket,collision.scene)
+                        last_peers=time.monotonic()
                     if time.monotonic()-last_rewards>1.0:
                         for reward in rewards.read()+pickups.read():await socket.send(json.dumps(reward))
                         last_rewards=time.monotonic()
@@ -644,7 +779,10 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                     host_input.controls(inputs.enabled)
                     gui_enabled = inputs.gui_open and inputs.enabled
                     host_input.set_gui(gui_enabled)
+                    if joining:host_input.native_use(inputs.enabled and not gui_enabled and inputs.focused and bool(sample.get('nativeuse',False)))
                     commands=inputs.messages()
+                    scroll=native_wheel.read(render.wheel(),enabled=inputs.focused and inputs.enabled,gui=gui_enabled)
+                    if scroll:await socket.send(json.dumps({'t':'scroll','d':scroll,'scene':collision.scene}))
                     memory.input(gui_enabled,inputs.enabled,inputs.movement())
                     for command in commands:
                         if command.get('k')=='perspective':host_input.cycle_perspective()
@@ -655,13 +793,15 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                             attack=inputs.world_down.get(1,False),use=inputs.world_down.get(2,False))
                         last_gameplay=time.monotonic()
                     # Drain server notices without starving the sender.
-                    try:
-                        reply = await asyncio.wait_for(socket.recv(), timeout=0.001)
+                    replies=await receive_guest_batch(socket)
+                    for reply in replies:
                         try:
                             event = json.loads(reply)
                             if not accepts_scene(event,collision.scene):event={'t':'stale_scene'}
                             collision.apply(event)
                             gameplay.apply(event)
+                            if room and event.get('t')=='roomack':room.ack_event(event)
+                            if room:room.guest_event(event)
                             if event.get('t') == 'syncdone' and event.get('id') == sync_id:
                                 synced = True
                             if event.get('t') == 'mapready' and guest_map is not None and event.get('map')==guest_map[0] and event.get('epoch',0)==guest_map[1]:
@@ -670,11 +810,10 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
                                 inputs.gui_open = bool(event.get('open')) and not host_menu
                         except (ValueError, TypeError):
                             pass
+                    if replies:
                         args.events.parent.mkdir(parents=True, exist_ok=True)
                         with args.events.open("a", encoding="utf-8") as output:
-                            output.write(reply + "\n")
-                    except asyncio.TimeoutError:
-                        pass
+                            output.write('\n'.join(replies) + "\n")
                     # The old 5ms receive wait + 10ms sleep capped camera delivery
                     # below the guest's 120 FPS. Poll at ~250Hz without busy-waiting.
                     await asyncio.sleep(0.003)
@@ -682,6 +821,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render):
             if isinstance(error,websockets.exceptions.ConnectionClosed) and error.rcvd and error.rcvd.code==1008:
                 raise RuntimeError('Minecraft is already owned by another bridge; stop the older launcher') from error
             reset_input_session(inputs,memory,host_input)
+            host_input.native_use(False)
             collision.cells.clear()
             if collision.map:
                 collision.publish(collision.map,[0,0,0],active=False)
@@ -698,6 +838,7 @@ if __name__ == "__main__":
     parser.add_argument("--events", type=Path, default=Path(__file__).parent / "events.jsonl")
     parser.add_argument('--play-cfg',default='')
     parser.add_argument('--restore-cfg',default='')
+    parser.add_argument('--coop-config',type=Path,default=Path(__file__).resolve().parent.parent/'l4d2mc.coop.json')
     arguments = parser.parse_args()
     arguments.game=game_path(arguments.game)
     if not 320 <= arguments.width <= 3840 or not 240 <= arguments.height <= 2160:

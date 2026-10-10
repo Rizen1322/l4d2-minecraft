@@ -117,6 +117,9 @@ public final class SurvivalFeatures {
         MinecraftServer s=WorldBridge.server();if(s==null)return;
         WorldBridge.serverWork(s,()->{if(!Passthrough.active || !MapBuilds.ready || !privateWorld(s) || s.getPlayerList().getPlayers().isEmpty())return;
             ServerPlayer p=s.getPlayerList().getPlayers().getFirst();
+            // Never revive a dead guest by syncing health: the server ignores respawn
+            // requests while health is positive, which leaves the death screen stuck.
+            if(p.deathTime>0 || p.isDeadOrDying()){if(p.getHealth()>0)p.setHealth(0);return;}
             healthPlayer=p.getUUID();healthScene=MapBuilds.scene();healthAt=System.nanoTime();
             p.setHealth(GuestMessages.health(hp,maximum,incap));
             p.setAbsorptionAmount(incap?0:(float)Math.clamp(temporary/maximum*20,0,20));

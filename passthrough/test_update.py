@@ -19,8 +19,9 @@ class UpdatePreflightTests(unittest.TestCase):
                     (root/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
                     (root/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
                 pairs.extend((root/'passthrough/shaders'/n,game/'bin/l4d2mc/shaders'/n) for n in ('TeamHud.fxh','L4D2Minecraft.fx'))
-                pairs.extend((root/'passthrough/host'/n,game/'left4dead2/scripts/vscripts'/n) for n in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut'))
+                pairs.extend((root/'passthrough/host'/n,game/'left4dead2/scripts/vscripts'/n) for n in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut','l4d2mc_coop.nut','l4d2mc_flight.nut'))
                 manifest={}
+                pairs.extend((root/'passthrough/host'/n,game/'left4dead2/cfg'/n) for n in ('l4d2mc_use_press.cfg','l4d2mc_use_release.cfg'))
                 for source,target in pairs:
                     source.parent.mkdir(parents=True,exist_ok=True);target.parent.mkdir(parents=True,exist_ok=True)
                     source.write_bytes(b'new');target.write_bytes(b'old');manifest[str(target)]=install.digest(target)

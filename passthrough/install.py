@@ -178,6 +178,10 @@ def host(manifest):
         (ROOT / "passthrough/host/l4d2mc_gameplay.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_gameplay.nut"),
         (ROOT / "passthrough/host/l4d2mc_survival.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_survival.nut"),
         (ROOT / "passthrough/host/l4d2mc_navigation.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_navigation.nut"),
+        (ROOT / "passthrough/host/l4d2mc_coop.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_coop.nut"),
+        (ROOT / "passthrough/host/l4d2mc_flight.nut", GAME / "left4dead2/scripts/vscripts/l4d2mc_flight.nut"),
+        (ROOT / "passthrough/host/l4d2mc_use_press.cfg", GAME / "left4dead2/cfg/l4d2mc_use_press.cfg"),
+        (ROOT / "passthrough/host/l4d2mc_use_release.cfg", GAME / "left4dead2/cfg/l4d2mc_use_release.cfg"),
     ]
     files.extend((p, shader_dir / p.name) for p in (ROOT / "passthrough/shaders").glob('*') if p.is_file())
     files.extend((p, GAME / 'left4dead2/models/l4d2mc' / p.name) for p in (ROOT / 'addon/models/l4d2mc').glob('*') if p.is_file())
@@ -187,10 +191,34 @@ def host(manifest):
     print("L4D2 loader, adapter, shader and VScript installed.")
 
 
+def install_guest_profile(source,target,manifest):
+    """Preserve a conflicting launcher profile when installing this exact mod ID.
+
+    General file/loader ownership rules still refuse unknown replacements.
+    Only this deliberately selected mod profile can be moved aside, reversibly.
+    """
+    identifier='L4D2MC-Fabric-26.3'
+    expected=MINECRAFT/f'versions/{identifier}/{identifier}.json'
+    if target.absolute()!=expected.absolute():raise RuntimeError('Unexpected guest profile destination')
+    key=str(target.absolute());backup=None
+    if target.exists() and key not in manifest and digest(target)!=digest(source):
+        if target.is_symlink():raise RuntimeError('Guest profile is a symlink; preserved without replacement')
+        import uuid
+        backup=target.with_name(target.name+'.l4d2mc-backup-'+uuid.uuid4().hex)
+        # Same-directory rename preserves exact bytes, including custom arguments,
+        # and never moves/deletes the version folder, accounts, worlds or saves.
+        target.rename(backup)
+        print('Existing mod profile preserved as: '+str(backup))
+    try:install_file(source,target,manifest)
+    except BaseException:
+        if backup is not None and backup.exists() and not target.exists():backup.rename(target)
+        raise
+
+
 def guest(manifest):
     global MINECRAFT
     MINECRAFT=MINECRAFT or minecraft_path()
-    jar = ROOT / "passthrough/guest/build/libs/passthrough-0.1.0.jar"
+    jar = ROOT / "passthrough/guest/build/libs/passthrough-0.2.0.jar"
     if not jar.exists():
         raise RuntimeError("Build guest jar first")
     # Flatten the official vanilla + Fabric metadata. Replace only the gameDir
@@ -213,7 +241,7 @@ def guest(manifest):
     staging.mkdir(parents=True, exist_ok=True)
     profile = staging / f'{identifier}.json'
     profile.write_text(json.dumps(vanilla, indent=2), encoding='utf-8')
-    install_file(profile, MINECRAFT / f'versions/{identifier}/{identifier}.json', manifest)
+    install_guest_profile(profile, MINECRAFT / f'versions/{identifier}/{identifier}.json', manifest)
     # Fabric API is a public library, not a user's retail asset.
     api_name = 'fabric-api-0.161.0+26.3.jar'
     api = staging / api_name

@@ -390,7 +390,7 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
     survival.nextAggro=Time()+0.25;local count=0;
     local bots=[];foreach(cls in ["infected","player"]) {
         local e=null;while((e=Entities.FindByClassnameWithin(e,cls,player.GetOrigin(),1536))!=null && bots.len()<64)
-            if(e.GetHealth()>0 && (cls=="infected" || (!e.IsSurvivor() && e.IsBot())))bots.append(e);
+            if(e.GetHealth()>0 && (cls=="infected" || (!e.IsSurvivor() && IsPlayerABot(e))))bots.append(e);
     }
     foreach(e in bots) {
         local best=null,bestId=0,dist=384.0;
@@ -521,7 +521,8 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
         },
         OnGameEvent_round_start=function(event) {
             if("L4D2MCBridge" in getroottable()) {
-                local b=L4D2MCBridge;b.epoch=RandomInt(1,2000000000);b.SurvivalCleanup();
+                local b=L4D2MCBridge;if("FlightCleanup" in b)b.FlightCleanup();
+                b.epoch=RandomInt(1,2000000000);b.SurvivalCleanup();
                 b.survival.totemPending=null;b.survival.totemHeld=false;b.survival.totemAt=-100.0;
                 b.survival.links.clear();
                 b.ClearCollision();b.collisionSequence="";
@@ -564,6 +565,7 @@ if(!("L4D2MCSurvivalEvents" in getroottable())) {
             b.Reply(format("\"t\":\"supply\",\"pos\":[%.4f,%.4f,%.4f],\"kind\":%d",p.x/32,p.z/32,-p.y/32,RandomInt(0,3)));
         }
     };
+    if("CoopWrapEvents" in L4D2MCBridge)L4D2MCBridge.CoopWrapEvents(L4D2MCSurvivalEvents);
     if("__CollectEventCallbacks" in getroottable() && "RegisterScriptGameEventListener" in getroottable())
         __CollectEventCallbacks(L4D2MCSurvivalEvents,"OnGameEvent_","GameEventCallbacks",RegisterScriptGameEventListener);
     else printl("[L4D2MC] Survival event callbacks unavailable; director pre-damage hook only.");

@@ -443,3 +443,67 @@ receipt atomicJSON, ordinaryIOrollback, checksum/existence recheck foruseredits,
 durablependingjournal before replace and startuprecovery. Recovery preservesunexpected
 externaltarget/receiptchanges. Testsisolatedtemporary receipts; no saves changed.
 Aggregatebuild84Python,13JVM,7Source,Win32cursor passed; no games launched.
+
+2026-10-10 continuation (Claude): reviewed uncommitted LAN co-op/Elytra/crouch/eating
+work. Retail L4D2 console showed an earlier l4d2mc_coop.nut:151 compile error; the
+current installed script equals the repo copy and the 19:05 session loaded without it.
+Build under Python3.13 (websockets17) exposed a room-handler signature break:
+websockets>=13 passes only the connection. Handler path is now optional; the test
+checks closed state for both APIs. Launcher runtime still uses Python3.12/websockets10.4.
+Full build passed: 106 Python, JVM, Source suites, x86 PE, cursor test. update.py
+installed everything except L4D2Minecraft.addon32 (locked by running L4D2).
+Bridge process from the 19:05 launch was no longer running. In-game test pending restart.
+Retail VM still rejected l4d2mc_coop.nut ChapterReward (line151 col142, then line165):
+"end of statement expected (; or lf)" at a statement that followed an if-body
+(block, or if/else-if chain) on the same line. Split those lines; the installed
+retail VM now compiles coop and flight via -hijack +exec script_execute (oracle).
+Standalone sq3.2 does not catch this. Launchers started from the agent shell die
+with the tool call (process tree kill), leaving an orphan bridge; start the .bat
+via explorer.exe. 19:21 relaunch: fresh pose, bridge+launcher alive, no script errors.
+F5 weapon: live diag showed the held weapon_pistol already had EF_NODRAW and
+kRenderNone but stayed visible. The client draws an owner's active weapon in third
+person regardless of both. Hiding now uses kRenderTransColor with m_clrRender alpha 0,
+and restore puts back the saved mode and colour. Hot-reloaded into the running game:
+weapon rm=1, clr=0x00FFFFFF. User visual confirmation pending. Co-op host cfg now sets
+sv_allow_lobby_connect_only 0 for direct +connect. Added tools/pack_for_friend.ps1
+and docs/FRIEND_GUIDE_RU.md; release/l4d2mc-friend.zip (93MB) checked: no tokens,
+local config, JAR or VPK inside.
+Alpha 0 alone did not hide the carried weapon in F5 (user screenshots). Carried weapons
+now also get m_iWorldModelIndex 0, and the saved index comes back on drop/restore.
+Per-frame sampling over 8 s showed stable hidden state (melee, wm=0, no resets).
+Ledge hang exported visible=false (scripted view entity / frozen flags), so Steve
+disappeared and hiding paused. The hang now counts like a pin for visibility. F5 now
+sets c_thirdpersonshoulderoffset 0 (restored with the other controlled vars).
+Third-person "Steve eaten by world on fast spin": the compositor reprojects one MC
+depth layer, and orbit-camera translation exposes disocclusion. Not fixed yet.
+Reverted m_iWorldModelIndex=0: the client re-deployed the weapon on every change (constant draw/holster sound, flashlight swinging). F5 weapon stays visible until a non-model approach is found. Manual script copies desynced the install receipt; synced hashes for files equal to repo source.
+Axe lying next to Steve: the interact event (RMB use on a door with no block/entity target) called DropItem on a held weapon_melee as if it were a carry prop. The survivor was left with no weapons and the dropped axe stayed visible. Interact now drops only CarryItem props; the test now covers a gascan drop and keeping the melee.
+Golem stall: l4d2mc_survival.nut aggro used e.IsBot(), which retail CTerrorPlayer lacks.
+Every aggro tick threw once a special infected was in range. Now IsPlayerABot(e).
+F5 front camera: Source clamps cam_idealyaw to c_minyaw/c_maxyaw (+-135), so the
+requested 180 became -135 (side view). F5 now sets the limits to +-180, restored
+on exit. Held melee (weapon_melee) still draws in third person despite EF_NODRAW
+and alpha 0; testing survivor m_clrRender alpha 0 live. Shader: near (<4 m) guest
+surfaces accept 6 px back-projection error instead of 1.5 px, so Steve's silhouette
+survives orbit turns. Compiles at next ReShade start.
+Link drop: PlayerSync.tick returned on a stale pose. With Elytra equipped flying was off, so Steve fell into the void and died repeatedly. Now he hovers at the last host position. Stuck respawn: hostHealth set positive health on a dead ServerPlayer, and the server ignores PERFORM_RESPAWN while health>0. Health sync now skips dead players and zeroes revived-dead health.
+Perf pass (no content changes): native upload streams shared memory straight into the back textures and checks seq after the copy, instead of first copying the 44 MB snapshot. The red/blue swap moved from a per-pixel CPU loop to .bgra on the three colour reads in the effect, so uploads are plain memcpy. HidePlayerWeapons runs its full entity scan 4x/s instead of 30x/s and rechecks cached attachments between scans (a detached model is still restored on the next tick). Shader change is unverified until ReShade compiles it at launch.
+Golem idle after first kill: in the default attack order a golem with no target had no destination. Attack now regroups with the player like follow. Survivor itself gets kRenderTransColor alpha 0 (HideSurvivor) so client-side melee/holster attachments disappear; restored with the hidden record. Shader: MotionBias*|WarpT| added to the depth allowance (blocks sank into the floor while walking); near tolerance lowered to 4 px. User reports repeated draw/holster again; a 5 s per-frame server sample showed no weapon/state/viewmodel changes (only movement buttons).
+Deploy-sound spam confirmed gone after we stopped writing predicted_viewmodel render state, but the third-person pistol came back, so the pistol draws through the viewmodel. Viewmodel now gets render colour only (TransparentModel; no EF_NODRAW, the flag the client toggles while deploying). The restore path skips flag writes for these records. Golem: SourcePursuitGoal drops a target after 60 ticks without getting closer (wall, other floor, no route) and ignores it for 10 s; MobWar.targetFor respects that.
+Front F5 diagnosis by sampling the native render camera: back view 3.00 m straight behind; front view 2.04 fwd / 2.04 side (135 deg). Cause: -hijack argv parsed '+c_minyaw -180' as a launch switch, so the -135 limit stayed. Perspective commands now go through an owned cfg (l4d2mc_view.cfg, +exec). Front view also inverts m_pitch, as Minecraft does; the launcher restores m_pitch and forces it positive. Tick profiling by stubbing stages: 4.5 ms average per think (warning every tick, 70 ms spikes). CoopExport rebuilt the whole host pose and wrote a second file even solo; it now runs only with a remote human survivor and reuses the cached host pose. GroundPhysics probe budget 6->3 bodies per think (~50 traces each). Result: 2.6 ms average. Golem: melee protectors ignore proxies more than 3 blocks above/below.
+F5 front head: Source keeps the front camera pitch equal to the aim. The front view now inverts m_pitch and the guest mirrors Steve's head (pose 'front'), as Minecraft's front view does. Splash/lingering potions, snowballs and eggs fell through the floorless guest world. They are now reported as 'thrown', Source-traced without host damage, and broken in place via a Projectile.onHit invoker. Blocks breaking up while walking: screen bursts showed reprojection slivers and missing edges. PosePrediction slider and fps_max 120 changed nothing. Added CameraLead: the bridge leads only the guest's camera copy by velocity*35 ms (L4D2MC_CAMERA_LEAD, capped 1 unit, reset on teleport, never during elytra drive), so the compositor's leftover translation shrinks.
+Regression: PlayerSync.hold ran whenever live() was null, including hidden/cutscene poses. It teleported Steve back and stopped fall flying mid-flight: the jumping, closed wings and doubled wind sound. It now holds only on a real link loss (no pose for 0.5 s), never while fall flying. The near tolerance, motion bias and camera lead did not fix walking artifacts and were set back to 0 by default. Steve tearing: the exporter wrote the host pose instead of the camera MC actually rendered from (the elytra chase cam differs). It now exports mainCamera().position() plus Steve's feet relative to the camera (desc 112..127). The compositor passes SteveCam/SteveUp in MC camera space; the effect takes pixels inside Steve's capsule unwarped and rejects translated Steve copies. Unverified until ReShade compiles it in game.
+Method reset per universal-modder frame-compositing note (diagnostics first, hypothesis list). H1: the host pose leads the depth buffer by one frame. mat_queue_mode=-1 (auto, queued on multicore); the compositor reads VEngineClient WorldToViewMatrix at reshade_begin_effects while the main thread may already be on the next frame. Test: mat_queue_mode 0 live; walking/F5 artifacts should mostly vanish if H1 holds. Measured: MC 114-119 fps, readback 6.6 ms, bridge loop ~4 ms; uncapping MC fps and fps_max 120 did not change artifacts. Earlier tweaks (near tolerance, motion bias, camera lead) disproved.
+
+## 2026-10-11: co-op reliability and remote combat
+
+- Three agents audited room transport, Source/guest combat ownership, and projectile/aim timing. User changes preserved; no games launched or closed.
+- Fixed loss of pending block edits on disconnect/backlog overflow, added authenticated input IDs/replay dedupe and bounded application receipts; room events remain pending until guarded Minecraft server dispatch emits roomack.
+- Split 5-second network membership lease from the unchanged 1-second frozen Source watchdog; tick delay now includes elapsed RTT rather than adding another fixed sleep.
+- Python bridge drains bounded guest message batches and logs them together. Source reply acknowledgements no longer evict discrete melee/teleport events from the gameplay deque.
+- Remote client mob copies accept melee routed through their actual owning guest server, with current-scene/owner/distance validation and duplicate-hit suppression. Remote projectile/splash damage against these client-only mob replicas remains unsupported.
+- Projectile reports retain launch origins across snapshot coalescing; Source immediately traces the first segment and skips resolved/zero-length retries. Fresh aim is applied before attacks/throws; front-camera physical pitch inversion removed.
+- New Update-Coop.cmd/tools/update_coop.ps1 rebuild/check/update an existing owned installation without starting games or changing room config. Both PCs must update and restart before testing.
+- Final updater: Gradle build/check passed; 133 Python tests passed; host Squirrel syntax and all 11 Source regression scripts passed. Rebuilt guest JAR installed locally. Tests exercise real loopback sockets; a real two-PC latency/gameplay verification is still required.
+- Deliverable: release/l4d2mc-coop-update.zip (sources, no private portraits/retail assets or room secrets). Full friend ZIP updated too.
+- Generated co-op YouTube thumbnail and English title/description copy saved under output/youtube; built-in imagegen used.

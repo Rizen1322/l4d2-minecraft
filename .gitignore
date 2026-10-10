@@ -16,6 +16,17 @@ passthrough/guest-game/
 passthrough/events.jsonl
 passthrough/native/build/
 l4d2mc.local.json
+l4d2mc.coop.json
+l4d2mc.coop.json.tmp
+*.cnut
+# Local troubleshooting notes and accidentally extracted repair bundles.
+/sdaads.txt
+/docs/passthrough/
+/docs/tools/
+/docs/Auto-Setup-L4D2MC.ps1
+/docs/Launch-Minecraft.ps1
+/docs/CONNECTION-CHECK.txt
+/docs/SETUP-FIX-README.txt
 .env
 .env.*
 output/

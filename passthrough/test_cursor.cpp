@@ -2,7 +2,8 @@
 #include <cstdio>
 // A hidden private window exercises the real thread hook without changing focus.
 static HWND testWindow=nullptr;
-static HWND test_foreground(){return testWindow;}
+static bool foreground=true;
+static HWND test_foreground(){return foreground?testWindow:nullptr;}
 #define GetForegroundWindow test_foreground
 #include "native/source_cursor.h"
 #undef GetForegroundWindow
@@ -38,6 +39,24 @@ int main() {
     gameplay=true;source_cursor::hide=false;event();if(!check(GetCursor()!=nullptr,"Inventory cursor must survive"))return 8;
     source_cursor::hide=true;event(HTCAPTION);if(!check(GetCursor()!=nullptr,"Window border cursor must survive"))return 9;
     source_cursor::updated=GetTickCount64()-2000;event();if(!check(GetCursor()!=nullptr,"Expired presentation must yield"))return 10;
+    source_cursor::publish(testWindow,false,verified);
+    const int32_t wheelStart=source_cursor::wheelUnits.load();
+    SendMessageW(testWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);
+    if(!check(source_cursor::wheelUnits.load()==wheelStart+WHEEL_DELTA,"Inventory wheel captured without hiding cursor"))return 12;
+    if(!check(GetCursor()!=nullptr,"Wheel changed inventory cursor"))return 13;
+    SendMessageW(testWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,60),0);
+    SendMessageW(testWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,static_cast<WORD>(-60)),0);
+    if(!check(source_cursor::wheelUnits.load()==wheelStart+WHEEL_DELTA,"High-resolution wheel units/sign lost"))return 17;
+    foreground=false;SendMessageW(testWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);foreground=true;
+    if(!check(source_cursor::wheelUnits.load()==wheelStart+WHEEL_DELTA,"Background Source wheel captured"))return 18;
+    gameplay=false;SendMessageW(testWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);
+    if(!check(source_cursor::wheelUnits.load()==wheelStart+WHEEL_DELTA,"Source menu wheel leaked to guest"))return 14;
+    gameplay=true;
+    HWND foreign=CreateWindowW(cls.lpszClassName,L"Foreign hidden window",0,0,0,1,1,nullptr,nullptr,cls.hInstance,nullptr);
+    SendMessageW(foreign,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);DestroyWindow(foreign);
+    if(!check(source_cursor::wheelUnits.load()==wheelStart+WHEEL_DELTA,"Foreign window wheel leaked"))return 15;
+    source_cursor::updated=GetTickCount64()-2000;SendMessageW(testWindow,WM_MOUSEWHEEL,MAKEWPARAM(0,WHEEL_DELTA),0);
+    if(!check(source_cursor::wheelUnits.load()==wheelStart+WHEEL_DELTA,"Expired hook captured wheel"))return 16;
     source_cursor::publish(testWindow,true,verified);source_cursor::remove();event();
     if(!check(GetCursor()!=nullptr && !source_cursor::hook,"Teardown must remove own hook"))return 11;
     SetEvent(stop);WaitForSingleObject(worker,5000);CloseHandle(worker);CloseHandle(ready);CloseHandle(stop);

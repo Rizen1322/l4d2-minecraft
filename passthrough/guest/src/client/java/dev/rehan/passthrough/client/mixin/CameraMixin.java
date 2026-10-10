@@ -42,6 +42,8 @@ abstract class CameraMixin {
 	@Inject(method = "update", at = @At("HEAD"))
 	private void passthrough$beginFrame(final DeltaTracker deltaTracker, final CallbackInfo ci) {
 		HostState.beginFrame();
+        dev.rehan.passthrough.client.PeerAvatars.frame();
+        dev.rehan.passthrough.client.PeerEntities.frame();
 		PlayerSync.frame(deltaTracker.getGameTimeDeltaPartialTick(true));
 	}
 

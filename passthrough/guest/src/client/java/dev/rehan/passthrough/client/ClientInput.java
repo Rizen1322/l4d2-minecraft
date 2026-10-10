@@ -72,6 +72,7 @@ final class ClientInput {
 			case "key" -> {
 				String k = m.get("k").getAsString();
 				boolean down = !m.has("down") || m.get("down").getAsBoolean();
+                if(down && (k.equals("attack") || k.equals("use")))PlayerSync.syncAim();
                     if (k.equals("chat") || k.equals("command")) {
                         if(down && player!=null && minecraft.gui.screen()==null)
                             minecraft.gui.setScreen(new ChatScreen(k.equals("command")?"/":"",false));
@@ -109,7 +110,17 @@ final class ClientInput {
                     case "sprint" -> minecraft.options.keySprint;
 					default -> null;
 				};
-				if (k.equals("attack") && down && player != null && !(minecraft.hitResult instanceof EntityHitResult)) {
+				if(k.equals("attack") && down && player!=null && minecraft.hitResult instanceof EntityHitResult hit
+                        && PeerEntities.attackable(hit.getEntity())) {
+                    double strength=player.getAttackStrengthScale(0.5F);
+                    double damage=player.getAttributeValue(Attributes.ATTACK_DAMAGE)*(0.2+strength*strength*0.8);
+                    PeerEntities.attack(hit.getEntity(),damage);
+                    player.swingAndResetAttackStrength(net.minecraft.world.InteractionHand.MAIN_HAND,
+                        net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+                    return;
+                }
+				if (k.equals("attack") && down && player != null && (!(minecraft.hitResult instanceof EntityHitResult hit)
+                        || dev.rehan.passthrough.MobWar.isProxy(hit.getEntity()))) {
                     double strength=player.getAttackStrengthScale(0.5F);
                     double damage=player.getAttributeValue(Attributes.ATTACK_DAMAGE)*(0.2+strength*strength*0.8);
                     Passthrough.events.accept(String.format(Locale.ROOT,"{\"t\":\"melee\",\"d\":%.3f,\"r\":3.0,\"cut\":%b,\"tier\":%d}",damage,player.getMainHandItem().is(net.minecraft.tags.ItemTags.SWORDS),player.getMainHandItem().is(net.minecraft.world.item.Items.NETHERITE_SWORD)?2:player.getMainHandItem().is(net.minecraft.world.item.Items.DIAMOND_SWORD)?1:0));

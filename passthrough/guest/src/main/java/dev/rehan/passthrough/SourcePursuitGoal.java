@@ -13,9 +13,29 @@ import net.minecraft.world.phys.Vec3;
 
 /** Pursue Source targets without asking vanilla navigation to path through its invisible map. */
 final class SourcePursuitGoal extends Goal {
+    /** Unreachable targets per mob: (mob id << 32 | target id) -> System.nanoTime() expiry. */
+    private static final java.util.Map<Long,Long> IGNORED=new java.util.HashMap<>();
+    private static final int STALL_TICKS=60;
+    private static final long IGNORE_NANOS=10_000_000_000L;
     private final Mob mob;
-    private int attackCooldown,avoidTicks;
-    private double side=1;
+    private int attackCooldown,avoidTicks,stallTicks;
+    private double side=1,bestDistance=Double.MAX_VALUE;
+    private int trackedTarget=-1;
+    static boolean ignored(Mob mob,net.minecraft.world.entity.LivingEntity target){
+        Long until=IGNORED.get(((long)mob.getId()<<32)|(target.getId()&0xffffffffL));
+        if(until==null)return false;
+        if(System.nanoTime()-until<0)return true;
+        IGNORED.remove(((long)mob.getId()<<32)|(target.getId()&0xffffffffL));return false;
+    }
+    /** A target the mob cannot get closer to (wall, other floor, no Source route) must not pin it forever. */
+    private boolean stalled(net.minecraft.world.entity.LivingEntity target,double distance,boolean attacking){
+        if(target.getId()!=trackedTarget){trackedTarget=target.getId();bestDistance=distance;stallTicks=0;return false;}
+        if(attacking || distance<bestDistance-.25){bestDistance=Math.min(bestDistance,distance);stallTicks=0;return false;}
+        if(++stallTicks<STALL_TICKS)return false;
+        if(IGNORED.size()>256)IGNORED.clear();
+        IGNORED.put(((long)mob.getId()<<32)|(target.getId()&0xffffffffL),System.nanoTime()+IGNORE_NANOS);
+        trackedTarget=-1;stallTicks=0;return true;
+    }
     SourcePursuitGoal(Mob mob){this.mob=mob;setFlags(EnumSet.of(Flag.MOVE,Flag.LOOK));}
     @Override public boolean canUse(){return Passthrough.active && MapBuilds.ready && mob.getTarget()!=null
         && mob.getTarget().isAlive() && MobWar.targetFor(mob,mob.getTarget());}
@@ -36,6 +56,8 @@ final class SourcePursuitGoal extends Goal {
         boolean clear=HostNavigation.canAttack(mob,target.position());
         Vec3 waypoint=HostNavigation.next(mob,target.position());
         double stop=ranged?8:reach;
+        boolean inRange=clear && distance<=(ranged?12:reach) && Math.abs(target.getY()-mob.getY())<2.5;
+        if(stalled(target,distance,inRange)){mob.setTarget(null);mob.getNavigation().stop();return;}
         if(waypoint!=null && !(clear && distance<=stop && Math.abs(target.getY()-mob.getY())<1)) {
             double wx=waypoint.x-mob.getX(),wz=waypoint.z-mob.getZ(),wd=Math.hypot(wx,wz);
             if(wd>1e-4) {

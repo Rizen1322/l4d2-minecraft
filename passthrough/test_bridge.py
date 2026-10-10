@@ -7,6 +7,53 @@ from bridge import CollisionSnapshot, camera, position, surface, render_camera, 
 
 
 class SessionTests(unittest.TestCase):
+    def test_room_delivery_retains_successfully_sent_events_until_minecraft_ack(self):
+        import asyncio
+        from collections import deque
+        from bridge import send_room_events
+        async def run():
+            events=deque([{'t':'peerattack','scene':1,'seq':1},{'t':'peerattack','scene':1,'seq':2}])
+            sent=[]
+            class Room:
+                def peek_events(self):return list(events)
+                def mark_sent(self,event):sent.append(event)
+                def commit_events(self,batch):
+                    for event in batch:
+                        selftest.assertIs(events.popleft(),event)
+            class Socket:
+                count=0
+                async def send(self,raw):
+                    self.count+=1
+                    if self.count==2:raise OSError('guest disconnected')
+            selftest=self
+            with self.assertRaises(OSError):await send_room_events(Room(),Socket(),1)
+            self.assertEqual([e['seq'] for e in events],[1,2])
+            self.assertEqual([e['seq'] for e in sent],[1])
+        asyncio.run(run())
+    def test_guest_burst_drains_in_order_with_a_bounded_batch(self):
+        import asyncio
+        from bridge import receive_guest_batch
+        async def run():
+            queue=asyncio.Queue()
+            class Socket:
+                async def recv(self):return await queue.get()
+            for i in range(70):queue.put_nowait(str(i))
+            self.assertEqual(await receive_guest_batch(Socket(),budget=1),[str(i) for i in range(32)])
+            self.assertEqual(await receive_guest_batch(Socket(),budget=1),[str(i) for i in range(32,64)])
+            self.assertEqual(await receive_guest_batch(Socket(),budget=1),[str(i) for i in range(64,70)])
+            self.assertEqual(await receive_guest_batch(Socket()),[])
+        asyncio.run(run())
+    def test_native_wheel_fractional_world_gui_wrap_and_focus(self):
+        from bridge import WheelRelay
+        wheel=WheelRelay()
+        def read(n,gui=False,enabled=True):return wheel.read(n,enabled=enabled,gui=gui)
+        self.assertEqual(read(0),0);self.assertEqual(read(60),0);self.assertEqual(read(120),1)
+        self.assertEqual(read(60,gui=True),-.5)
+        self.assertEqual(read(180,enabled=False),0);self.assertEqual(read(300),1)
+        self.assertEqual(read(50000),0);self.assertEqual(read(50120),1)
+        wheel.counter=2**31-60
+        self.assertEqual(read(-2**31+60),1)
+        self.assertEqual(read(None),0);self.assertEqual(read(0),0)
     def test_full_collision_cache_keeps_complete_new_region_and_evicts_old_far_cells(self):
         with tempfile.TemporaryDirectory() as d:
             cache=CollisionSnapshot(Path(d)/'collision')
@@ -100,7 +147,42 @@ class InputTests(unittest.TestCase):
         self.assertIn({'t':'key','k':'inventory','down':True},relay_keys({0x45},state,focused=True,gui=False))
 
     def test_source_walk_and_jump_keys_are_not_replaced(self):
-        self.assertEqual(relay_keys({0x10,0x11,0x57,0x20},{},focused=True,gui=False),[])
+        self.assertEqual(relay_keys({0x10,0x11,0x57},{},focused=True,gui=False),[])
+        # Space still reaches Source normally; only an eligible equipped Elytra
+        # consumes this separate guest request when already airborne.
+        state={}
+        self.assertEqual(relay_keys({0x20},state,focused=True,gui=False),[{'t':'glide','on':True}])
+        self.assertEqual(relay_keys({0x20},state,focused=True,gui=False),[])
+        self.assertEqual(relay_keys(set(),state,focused=True,gui=False),[])
+        self.assertEqual(relay_keys({0x20},{},focused=True,gui=True),[])
+
+    def test_remote_native_use_edges_retry_failed_delivery_and_deduplicate(self):
+        host=HostInput(Path('remote-source'))
+        with patch.object(host,'_send',side_effect=[False,True,True]) as send:
+            host.native_use(True)
+            self.assertFalse(host.native_use_down) # Failed command remains eligible for retry.
+            host.native_use(True)
+            self.assertTrue(host.native_use_down)
+            host.native_use(True)
+            self.assertEqual(send.call_count,2)
+            host.native_use(False)
+            self.assertFalse(host.native_use_down)
+            host.native_use(False)
+            self.assertEqual(send.call_count,3)
+            self.assertEqual(send.call_args_list[-1].args[0],['+exec','l4d2mc_use_release'])
+            self.assertEqual(send.call_args_list[0].args[0],['+exec','l4d2mc_use_press'])
+
+    def test_remote_native_use_release_does_not_relaunch_closed_source(self):
+        host=HostInput(Path('remote-source'))
+        host.native_use_down=True
+        with patch.object(host,'_window',return_value=None),patch('bridge.subprocess.Popen') as launch:
+            host.native_use(False)
+            launch.assert_not_called()
+        # Retry after loading is still allowed; a failed release cannot be treated as sent.
+        with patch.object(host,'_send',return_value=True) as send:
+            host.native_use(False)
+            send.assert_called_once()
+            self.assertFalse(host.native_use_down)
 
     def test_cleanup_never_relaunches_absent_source(self):
         host=HostInput(Path('absent-source'))
@@ -152,6 +234,8 @@ class CameraTests(unittest.TestCase):
         sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"buttons":4,"usable":True}
         pose=camera(sample,16/9)
         self.assertTrue(pose['sneak']);self.assertTrue(pose['usable'])
+        sample['buttons']=131072;sample['grounded']=True
+        self.assertTrue(camera(sample,16/9)['sneak']);self.assertTrue(camera(sample,16/9)['grounded'])
 
     def test_render_view_outlier_never_teleports_guest_camera(self):
         pose = {'p':[20.088867,90.961929,-181.631287], 'r':[23.2474,14.50185,0], 'fov':73.7398}
@@ -327,3 +411,45 @@ class FramedCollisionTests(unittest.TestCase):
             rows=c.path.read_text().splitlines();header=rows[0].split();footer=rows[-1].split()
             self.assertEqual(header[2],'17')
             self.assertEqual(footer,['end',header[0],str(len(rows)-2)])
+
+class CameraLeadTests(unittest.TestCase):
+    def test_leads_guest_camera_along_steady_motion_only(self):
+        from bridge import CameraLead
+        lead = CameraLead(0.05, 1.0)
+        pose = lambda x: {'p': [x, 64.0, 0.0], 'pl': [x, 62.4, 0.0]}
+        self.assertEqual(lead.lead(pose(0.0), 0.0)['p'], [0.0, 64.0, 0.0])
+        out = None
+        for i in range(1, 10):
+            out = lead.lead(pose(i * 0.1), i * 0.016)
+        # ~6.25 units/s for 0.05 s ahead: about 0.31 in front of the real camera.
+        self.assertAlmostEqual(out['p'][0] - 0.9, 0.3125, delta=0.02)
+        self.assertAlmostEqual(out['pl'][0] - out['p'][0], 0.0, places=6)
+        # A teleport resets instead of flinging the guest camera.
+        self.assertEqual(lead.lead(pose(500.0), 0.2)['p'], [500.0, 64.0, 0.0])
+        # Minecraft-driven elytra flight is never led.
+        flying = dict(pose(500.1), drive=True)
+        self.assertIs(lead.lead(flying, 0.216), flying)
+
+class PerspectiveCommandTests(unittest.TestCase):
+    def test_views_use_owned_cfg_and_front_view_inverts_pitch(self):
+        # -hijack argv drops values such as "-180"; commands live in an owned cfg file.
+        with tempfile.TemporaryDirectory() as root:
+            cfg = Path(root) / 'left4dead2' / 'cfg'
+            cfg.mkdir(parents=True)
+            (cfg / 'config.cfg').write_text('m_pitch "-0.030000"\n', encoding='utf-8')
+            sent = []
+            relay = HostInput(Path(root))
+            relay._send = lambda arguments: sent.append(list(arguments)) or True
+            views = []
+            for _ in range(3):
+                relay.cycle_perspective()
+                views.append((cfg / 'l4d2mc_view.cfg').read_text(encoding='ascii').splitlines())
+            for arguments in sent:
+                self.assertEqual(arguments, ['+exec', 'l4d2mc_view'])
+            back, front, first = views
+            self.assertIn('cam_idealyaw 0', back)
+            self.assertIn('m_pitch 0.030000', back)
+            self.assertIn('cam_idealyaw 180', front)
+            self.assertIn('c_minyaw -180', front)
+            self.assertIn('m_pitch -0.030000', front)  # with the guest's mirrored head, as in Minecraft
+            self.assertEqual(first, ['firstperson', 'm_pitch 0.030000'])

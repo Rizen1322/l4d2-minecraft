@@ -5,6 +5,44 @@ from combat import GameplayMailbox,source_position
 
 
 class CombatTests(unittest.TestCase):
+    def test_reply_ack_burst_cannot_evict_unpublished_attack(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'mailbox')
+            box.apply({'t':'melee','d':7,'r':3})
+            for ident in range(1,65):box.apply({'t':'replyack','id':ident})
+            for _ in range(100):box.apply({'t':'replyack','id':64})
+            box.publish('c1m1_hotel');text=box.path.read_text()
+            self.assertIn('event 1 melee 105.0 96.0',text)
+            self.assertEqual(sum(line.startswith('replyack ') for line in text.splitlines()),64)
+            box.publish('c1m1_hotel',active=False)
+            self.assertIn('replyack 64',box.path.read_text())
+            box.publish('c1m2_streets')
+            self.assertNotIn('replyack ',box.path.read_text())
+    def test_projectile_launch_origin_survives_mailbox_coalescing(self):
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'mailbox')
+            box.apply({'t':'proj','p':[[2,'ender_pearl',5,3,-4,0,1,2,-3]]})
+            box.publish('c1m1_hotel')
+            self.assertIn('projectile 2 ender_pearl 160 128 96 0.0 32 96 64',box.path.read_text())
+            for bad in ([2,'ender_pearl',5,3,-4,0,float('nan'),2,-3], [2,'arrow',5,3,-4,101,1,2,-3]):
+                with self.assertRaises(ValueError):box.apply({'t':'proj','p':[bad]})
+            box.publish('c1m1_hotel')
+            self.assertIn('projectile 2 ender_pearl',box.path.read_text())
+    def test_flight_and_eating_leases_menu_and_validation(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            box=GameplayMailbox(Path(d)/'mailbox')
+            with patch('combat.time.monotonic',return_value=10):
+                box.apply({'t':'flight','on':True,'elytra':True,'boost':4,'boosting':True})
+                box.apply({'t':'consume','using':True});box.publish('c1m1_hotel')
+                self.assertIn('flight 1 1 4 1',box.path.read_text());self.assertIn('consume 1',box.path.read_text())
+                box.publish('c1m1_hotel',gui=True)
+                self.assertNotIn('flight ',box.path.read_text());self.assertNotIn('consume ',box.path.read_text())
+            with patch('combat.time.monotonic',return_value=11):
+                box.publish('c1m1_hotel')
+                self.assertNotIn('flight ',box.path.read_text());self.assertNotIn('consume ',box.path.read_text())
+            for bad in ({'t':'consume','using':1},{'t':'flight','on':True,'elytra':True,'boost':True,'boosting':False}):
+                with self.assertRaises(ValueError):box.apply(bad)
     def test_entity_snapshots_expire_when_guest_server_stalls_and_resume_when_fresh(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as d:

@@ -35,18 +35,20 @@ public final class WorldBridge {
 
 	public static void serverWork(MinecraftServer s,Runnable action){ServerDispatchPolicy.run(s.isSameThread(),s::execute,action);}
 
-    public static void clearTransient(){changes.clear();barricadeDamage.clear();}
+    public static void clearTransient(){changes.clear();barricadeDamage.clear();projectileOrigins.clear();}
 
     private WorldBridge() {
 	}
 
 	static void attach(final MinecraftServer s) {
-		server = s;changes.clear();GuestFire.reset();
+		server = s;clearTransient();GuestFire.reset();ElytraBridge.reset();CoopBlocks.reset();
 	}
 
 	static void detach() {
 		saveMigration();
         GuestFire.reset();
+        ElytraBridge.reset();
+        CoopBlocks.reset();
         clearTransient();
 		server = null;
 		barriers.clear();
@@ -176,6 +178,8 @@ public final class WorldBridge {
 	static void tick(final MinecraftServer s) {
 		MapBuilds.tick(s);
         SurvivalFeatures.tick(s);
+        ElytraBridge.tick(s);
+        CoopBlocks.tick(s);
         RedstoneLinks.tick(s);
         flush(s);
         if (++migrationTicks%100==0) saveMigration();
@@ -189,11 +193,19 @@ public final class WorldBridge {
 	}
 
 	/**
-	 * Steve's arrows (bow, crossbow) and crossbow fireworks in flight: {"t":"proj","p":[[id,kind,x,y,z],...]}. Mobs'
+	 * Player projectiles in flight: {"t":"proj","p":[[id,kind,x,y,z,damage,launchX,launchY,launchZ],...]}. Mobs'
 	 * arrows aren't traced by the host: they hit its people's proxies here.
 	 */
+	private static boolean thrownItem(final Entity e) {
+		return e instanceof net.minecraft.world.entity.projectile.throwableitemprojectile.AbstractThrownPotion
+			|| e instanceof net.minecraft.world.entity.projectile.throwableitemprojectile.Snowball
+			|| e instanceof net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEgg;
+	}
+
+    private static final ProjectileOrigins projectileOrigins = new ProjectileOrigins();
 	private static void reportProjectiles(final ServerLevel level) {
 		StringBuilder b = null;
+        var alive = new java.util.HashSet<Integer>();
 		for (Entity e : level.getAllEntities()) {
 			String kind = null;
 			if (!(e instanceof Projectile projectile) || !(projectile.getOwner() instanceof Player)) {
@@ -206,17 +218,24 @@ public final class WorldBridge {
                 kind="ender_pearl";
             } else if (e instanceof FireworkRocketEntity rocket && rocket.isShotAtAngle()) {
 				kind = "firework"; // not the ones boosting an elytra flight
+			} else if (thrownItem(e)) {
+				kind = "thrown"; // the void guest world has no floor: Source geometry breaks them
 			}
 
 			if (kind != null) {
+                alive.add(e.getId());
+                var origin=projectileOrigins.remember(e.getId(),e.xo,e.yo,e.zo);
 				b = b == null ? new StringBuilder("{\"t\":\"proj\",\"p\":[") : b.append(',');
+                double damage=kind.equals("firework")?80.0/15.0:0;
 				if(e instanceof AbstractArrow arrow) {
-                    double damage=Math.ceil(arrow.getDeltaMovement().length()*((dev.rehan.passthrough.mixin.ArrowDamageAccessor)arrow).l4d2mc$baseDamage());
+                    damage=Math.ceil(arrow.getDeltaMovement().length()*((dev.rehan.passthrough.mixin.ArrowDamageAccessor)arrow).l4d2mc$baseDamage());
                     if(arrow.isCritArrow())damage*=1.25;
-                    b.append(String.format(Locale.ROOT,"[%d,\"%s\",%.3f,%.3f,%.3f,%.3f]",e.getId(),kind,e.getX(),e.getY(),e.getZ(),Math.clamp(damage,0,100)));
-                }else b.append(String.format(Locale.ROOT,"[%d,\"%s\",%.3f,%.3f,%.3f]",e.getId(),kind,e.getX(),e.getY(),e.getZ()));
+                }
+                b.append(String.format(Locale.ROOT,"[%d,\"%s\",%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f]",
+                    e.getId(),kind,e.getX(),e.getY(),e.getZ(),Math.clamp(damage,0,100),origin.x(),origin.y(),origin.z()));
 			}
 		}
+        projectileOrigins.retain(alive);
 
 		if (b != null) {
 			Passthrough.events.accept(b.append("]}").toString());
@@ -243,6 +262,13 @@ public final class WorldBridge {
 				e.setPos(x, y, z);
 				level.broadcastEntityEvent(e, (byte) 17);
 				e.discard();
+			} else if (thrownItem(e)) {
+				// Break where Source's trace hit: splash/lingering effects, snowball/egg impact.
+				e.setPos(x, y, z);
+				e.setDeltaMovement(Vec3.ZERO);
+				((dev.rehan.passthrough.mixin.ProjectileInvoker) e).l4d2mc$onHit(
+					new net.minecraft.world.phys.BlockHitResult(new Vec3(x, y, z), net.minecraft.core.Direction.UP, BlockPos.containing(x, y - 0.01, z), false));
+				if (!e.isRemoved()) e.discard();
 			} else if (e instanceof AbstractArrow) {
 				if (stick) {
 					e.setPos(x, y, z);
@@ -267,6 +293,7 @@ public final class WorldBridge {
         if(!placingGround)MapBuilds.changed(level,pos,state);
 		if (!placingGround) {
 			changes.put(pos.immutable(), solidForHost(level, pos, state));
+            CoopBlocks.changed(level,pos,state);
             barricadeDamage.remove(pos);
 		}
 	}
@@ -278,6 +305,7 @@ public final class WorldBridge {
 
 	/** End of each server tick: {"t":"blocks","set":[x,y,z,...],"clear":[x,y,z,...]}. */
 	static void flush(final MinecraftServer s) {
+        CoopBlocks.flush();
 		if (!MapBuilds.ready){changes.clear();return;}
         if (changes.isEmpty()) {
 			return;
@@ -314,6 +342,7 @@ public final class WorldBridge {
 			if (player == null) {
 				return;
 			}
+            CoopBlocks.snapshotIfNeeded();
 
 			BlockPos c = player.blockPosition();
 			BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
@@ -360,32 +389,7 @@ public final class WorldBridge {
 
 	/** Elytra on and gliding (creative flight off), launched forward along the look; or back to creative flight. */
 	public static void glide(final boolean start, final double speed) {
-		MinecraftServer s = server;
-		if (s == null) {
-			return;
-		}
-
-		WorldBridge.serverWork(s,() -> {
-			if (s.getPlayerList().getPlayers().isEmpty()) {
-				return;
-			}
-
-			ServerPlayer player = s.getPlayerList().getPlayers().get(0);
-			if (start) {
-				player.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.ELYTRA));
-				player.getAbilities().flying = false;
-				player.onUpdateAbilities();
-				player.setOnGround(false);
-				player.startFallFlying();
-				player.setDeltaMovement(player.getLookAngle().scale(speed));
-				player.needsSync = true;
-			} else {
-				player.stopFallFlying();
-				player.setItemSlot(EquipmentSlot.CHEST, ItemStack.EMPTY);
-				player.getAbilities().flying = true;
-				player.onUpdateAbilities();
-			}
-		});
+        ElytraBridge.request(start);
 	}
 
 	/** `source`: what exploded or was blown up, e.g. "tnt", "creeper", "fireball" (a ghast's). */

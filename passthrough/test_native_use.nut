@@ -8,6 +8,7 @@ class Vec {
 }
 local door={GetClassname=function(){return "prop_door_rotating_checkpoint";},GetName=function(){return "checkpoint_exit";}};
 local melee={GetClassname=function(){return "weapon_melee";}};
+local gascan={GetClassname=function(){return "weapon_gascan";}};
 local p={flags=64,weapon=null,drops=0,
     GetEntityIndex=function(){return 1;},EyePosition=function(){return Vec();},
     EyeAngles=function(){return {Forward=function(){return Vec();}};},
@@ -35,8 +36,8 @@ b.HeldActions(p,false,true,false);
 if(commands.len()!=1)throw "Hold spammed native press instead of one edge";
 now=0.2;b.HeldActions(p,false,false,false);
 if(useDown || commands.top()!="-use 32766")throw "IN_USE stuck after RMB release";
-p.weapon=melee;b.Event(["event","2","interact"],p);
-if(p.drops!=1)throw "Hidden starter carry weapon not dropped";
+p.weapon=gascan;b.Event(["event","2","interact"],p);
+if(p.drops!=1)throw "Carried prop not dropped";
 b.HeldActions(p,false,true,false);
 if(useDown)throw "Carry drop reused same click for checkpoint stage";
 b.HeldActions(p,false,false,false);b.Event(["event","3","interact"],p);b.HeldActions(p,false,true,false);
@@ -62,4 +63,6 @@ b.epoch<-123;b.TotemPendingFor<-function(player){return true;};b.TotemTick<-func
 ::Director<-{GetMapName=function(){return "map";}};
 ::FileToString<-function(path){return "owner map 0 333 0 0 0 0 123\nend 333 0";};
 if(!b.ReadGameplay(p) || useDown || b.gameplay.nativeUseIntent || b.gameplay.usePulseUntil!=0)throw "Pending dead-player rescue kept native use held";
+p.weapon=melee;p.drops=0;b.Event(["event","8","interact"],p);
+if(p.drops!=0 || p.weapon!=melee)throw "Door use dropped the hidden melee sidearm";
 print("Native checkpoint press/hold and carry-drop regressions passed\n");

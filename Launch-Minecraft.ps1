@@ -1,5 +1,22 @@
-﻿param([string]$Game = '', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
+param([string]$Game = '', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
 $ErrorActionPreference = 'Stop'
+# Optional local room settings; credentials stay in this file, never command arguments.
+$coopPath = Join-Path $PSScriptRoot 'l4d2mc.coop.json'
+$coopJoin = $false
+$coopServer = ''
+if (Test-Path -LiteralPath $coopPath) {
+    $coopSettings = Get-Content -LiteralPath $coopPath -Raw | ConvertFrom-Json
+    if ($coopSettings.mode -notin @('host','join')) { throw 'Co-op mode must be host or join.' }
+    $coopJoin = $coopSettings.mode -eq 'join'
+    if ($coopJoin) {
+        $coopServer = [string]$coopSettings.l4d2server
+        # Source console arguments must contain an address only, never command text.
+        if ($coopServer -notmatch '^(?:[a-zA-Z0-9][a-zA-Z0-9.-]*|\[[a-fA-F0-9:]+\])(?::[0-9]{1,5})?$') {
+            throw 'Co-op l4d2server must be a hostname/IP with an optional port.'
+        }
+    }
+}
+
 if (!$Game) {
     $Game = & python (Join-Path $PSScriptRoot 'passthrough\runtime_paths.py') game
     if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve game path. Set L4D2MC_GAME or pass -Game.' }
@@ -29,7 +46,7 @@ $restoreCfg = Join-Path $Game ('left4dead2\cfg\' + $restoreCfgName + '.cfg')
 $configFile = Join-Path $Game 'left4dead2\cfg\config.cfg'
 $controlRecovery = Join-Path $taskRoot 'backups\passthrough-launch-controls.json'
 $controlledKeys = @('MOUSE1','MOUSE2','MOUSE3','MWHEELUP','MWHEELDOWN','e','q','f','t','/','F5','F9') + (1..9 | ForEach-Object {[string]$_})
-$controlledVars = @('r_drawviewmodel','crosshair','cam_idealdist','cam_idealyaw','cam_idealpitch','cam_ideallag')
+$controlledVars = @('r_drawviewmodel','crosshair','cam_idealdist','cam_idealyaw','cam_idealpitch','cam_ideallag','c_thirdpersonshoulderoffset','c_maxyaw','c_minyaw','m_pitch')
 if (!('L4D2MC.MonotonicClock' -as [type])) {
     Add-Type -Namespace L4D2MC -Name MonotonicClock -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern ulong GetTickCount64();'
 }
@@ -79,7 +96,10 @@ if (Test-Path -LiteralPath $marker) {
 $initialAddons = [IO.File]::ReadAllBytes($addonList)
 $savedLines = foreach ($line in [IO.File]::ReadAllLines($configFile)) {
     if (($line -match '^bind\s+"([^"]+)"' -and $controlledKeys -contains $Matches[1]) -or
-        ($line -match '^([^\s]+)\s+' -and $controlledVars -contains $Matches[1])) { $line }
+        ($line -match '^([^\s]+)\s+' -and $controlledVars -contains $Matches[1])) {
+        # The front F5 view inverts m_pitch; a crash there must not persist inverted mouse.
+        if ($line -match '^m_pitch\s+"?-') { $line -replace '^(m_pitch\s+"?)-','$1' } else { $line }
+    }
 }
 $controlSnapshot = @{lines=@($savedLines)}
 $controlSnapshot | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $controlRecovery -Encoding UTF8
@@ -101,11 +121,17 @@ try {
         $addonText = [regex]::Replace($addonText,'}\s*$','"l4d2mc_hud.vpk" "1"' + "`n}")
     }
     [IO.File]::WriteAllText($addonList, $addonText)
-    [IO.File]::WriteAllText($cfg, "sv_cheats 1`nscript_execute l4d2mc_bridge`n", [Text.Encoding]::ASCII)
+    if (!$coopJoin) {
+        # A co-op host must accept the teammate's direct +connect, not only lobby joins.
+        $hostCommands = if (Test-Path -LiteralPath $coopPath) { "sv_allow_lobby_connect_only 0`n" } else { '' }
+        [IO.File]::WriteAllText($cfg, $hostCommands + "sv_cheats 1`nscript_execute l4d2mc_bridge`n", [Text.Encoding]::ASCII)
+    }
     $release = "-attack`n-attack2`n-use`n-zoom`n"
     $playText = $release + (($controlledKeys | ForEach-Object {'unbind "' + $_ + '"'}) -join "`n") + "`n"
-    $playText += 'bind "MWHEELUP" "script L4D2MCBridge.gameplay.wheel++"' + "`n"
-    $playText += 'bind "MWHEELDOWN" "script L4D2MCBridge.gameplay.wheel--"' + "`n"
+    if (!$coopJoin) {
+        $playText += 'bind "MWHEELUP" "script L4D2MCBridge.gameplay.wheel++"' + "`n"
+        $playText += 'bind "MWHEELDOWN" "script L4D2MCBridge.gameplay.wheel--"' + "`n"
+    }
     $playText += "cl_mouseenable 1`nr_drawviewmodel 0`ncrosshair 0`nfirstperson`n"
     [IO.File]::WriteAllText($playCfg,$playText,[Text.Encoding]::ASCII)
     $restoreText = $release + (($controlledKeys | ForEach-Object {'unbind "' + $_ + '"'}) -join "`n") + "`nr_drawviewmodel 1`ncrosshair 1`ncam_ideallag 4`nfirstperson`n" + ($savedLines -join "`n") + "`ncl_mouseenable 1`n"
@@ -113,13 +139,37 @@ try {
     $bridgeScript = Join-Path $taskRoot 'passthrough\bridge.py'
     $windowFlags = '-windowed -w ' + $Width + ' -h ' + $Height
     if($Borderless){$windowFlags += ' -noborder'}
-    $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList @('"' + $bridgeScript + '"', '--game', '"' + $Game + '"','--play-cfg',$playCfgName,'--restore-cfg',$restoreCfgName,'--width',[string]$Width,'--height',[string]$Height) -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
-    Start-Process -FilePath $steamExe -ArgumentList ('-applaunch 550 -insecure -novid ' + $windowFlags + ' -console -condebug +map ' + $Map) -WindowStyle Hidden
+    $bridgeArguments = @('-u', ('"' + $bridgeScript + '"'), '--game', ('"' + $Game + '"'), '--play-cfg', $playCfgName, '--restore-cfg', $restoreCfgName, '--width', ([string]$Width), '--height', ([string]$Height))
+    if (Test-Path -LiteralPath $coopPath) { $bridgeArguments += @('--coop-config', ('"' + $coopPath + '"')) }
+    $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList $bridgeArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
+    $sourceDestination = if ($coopJoin) { '+connect ' + $coopServer } else { '+map ' + $Map }
+    Start-Process -FilePath $steamExe -ArgumentList ('-applaunch 550 -insecure -novid ' + $windowFlags + ' -console -condebug ' + $sourceDestination) -WindowStyle Hidden
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     $nextProbe = [DateTime]::UtcNow.AddSeconds(12)
+    $nextStatus = [DateTime]::UtcNow
+    $roomStatusPath = Join-Path $Game 'left4dead2/ems/l4d2mc_room_status.txt'
+    if ($coopJoin) {
+        Write-Host 'Mode: joining a co-op host. Join the host L4D2 session with the player name entered in Coop.bat.'
+        if ($coopSettings.player) { Write-Host ('Configured L4D2 player: ' + (ConvertTo-Json -InputObject ([string]$coopSettings.player) -Compress)) }
+        else { Write-Host ('Configured L4D2 userid: ' + $coopSettings.userid) }
+    }
+    elseif (Test-Path -LiteralPath $coopPath) { Write-Host 'Mode: co-op host. Waiting for a teammate to join L4D2.' }
+    else { Write-Host 'Mode: solo. For multiplayer, first configure host/join through Coop.bat on both PCs.' }
+    Write-Host 'Waiting for L4D2 camera and Minecraft bridge (up to 120 seconds)...'
     while ([DateTime]::UtcNow -lt $deadline) {
+        if ($bridgeProcess.HasExited) {
+            Get-Content -LiteralPath (Join-Path $evidence 'bridge-errors.log') -Tail 12 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+            throw 'Minecraft bridge exited during startup. See evidence/bridge-errors.log.'
+        }
+        if ([DateTime]::UtcNow -ge $nextStatus) {
+            if ($coopJoin -and (Test-Path -LiteralPath $roomStatusPath)) {
+                try { $roomStatus = Get-Content -LiteralPath $roomStatusPath -Raw | ConvertFrom-Json; Write-Host ('Co-op: ' + $roomStatus.detail) } catch { Write-Host 'Waiting for room status...' }
+            }
+            Get-Content -LiteralPath (Join-Path $evidence 'bridge-runtime.log') -Tail 1 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+            $nextStatus = [DateTime]::UtcNow.AddSeconds(5)
+        }
         $hostProcess = Get-Process left4dead2 -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0} | Select-Object -First 1
-        if ($hostProcess -and [DateTime]::UtcNow -ge $nextProbe -and (Test-SourceRenderReady)) {
+        if (!$coopJoin -and $hostProcess -and [DateTime]::UtcNow -ge $nextProbe -and (Test-SourceRenderReady)) {
             Start-Process -FilePath $gameExe -ArgumentList ('-insecure -hijack +exec ' + $cfgName) -WindowStyle Hidden
             $nextProbe = [DateTime]::UtcNow.AddSeconds(5)
         }
@@ -127,7 +177,7 @@ try {
         Start-Sleep -Milliseconds 500
     }
     if (!$hostProcess -or !(Test-Path -LiteralPath $poseFile) -or (Get-Item -LiteralPath $poseFile).LastWriteTimeUtc -lt [DateTime]::UtcNow.AddSeconds(-2)) {
-        throw 'Local test map did not produce camera data. See L4D2 console.log.'
+        throw 'No L4D2 camera received. Send evidence/bridge-runtime.log and evidence/bridge-errors.log from BOTH PCs; also check the host L4D2 console.log.'
     }
     Write-Host 'Minecraft controls: LMB attack, RMB use, E inventory, 1-9/wheel hotbar, Q drop, F offhand, F5 camera, WASD/Space/Shift/Ctrl use original L4D2 binds.'
     Write-Host 'Keep Minecraft running and not minimized. Close L4D2 to restore Workshop flags.'
@@ -135,7 +185,7 @@ try {
         if ($bridgeProcess.HasExited) { throw 'Minecraft bridge stopped. Mouse control is being restored.' }
         # Campaign transitions recreate the VScript VM and its think anchor.
         # Reattach only to this launcher-owned insecure host after a stale pose.
-        if ([DateTime]::UtcNow -ge $nextProbe -and
+        if (!$coopJoin -and [DateTime]::UtcNow -ge $nextProbe -and
             (!(Test-Path -LiteralPath $poseFile) -or (Get-Item -LiteralPath $poseFile).LastWriteTimeUtc -lt [DateTime]::UtcNow.AddSeconds(-2)) -and (Test-SourceRenderReady)) {
             Start-Process -FilePath $gameExe -ArgumentList ('-insecure -hijack +exec ' + $cfgName) -WindowStyle Hidden
             $nextProbe = [DateTime]::UtcNow.AddSeconds(5)

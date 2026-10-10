@@ -43,6 +43,14 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach { it.options.release = 25 }
+// Standalone policy checks need little memory; avoid reserving a desktop-sized
+// default heap for every fork while both games are already running.
+tasks.withType(JavaExec).configureEach {
+    if (name.startsWith('verify')) {
+        minHeapSize = '16m'
+        maxHeapSize = '128m'
+    }
+}
 
 java {
 	sourceCompatibility = JavaVersion.VERSION_25
@@ -143,3 +151,12 @@ tasks.register('verifyProxyPresence', JavaExec) {
     mainClass = 'dev.rehan.passthrough.ProxyPresenceTest'
 }
 check.dependsOn verifyProxyPresence
+
+['PeerRoster','FlightPolicy','CoopBlockPolicy','EntityRosterPolicy','PeerAttackPolicy','ProjectileOrigins'].each { policy ->
+    tasks.register('verify'+policy, JavaExec) {
+        dependsOn testClasses
+        classpath=sourceSets.test.runtimeClasspath
+        mainClass='dev.rehan.passthrough.'+policy+'Test'
+    }
+    check.dependsOn 'verify'+policy
+}

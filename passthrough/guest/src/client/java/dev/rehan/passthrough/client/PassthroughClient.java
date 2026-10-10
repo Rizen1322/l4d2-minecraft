@@ -125,8 +125,9 @@ public class PassthroughClient implements ClientModInitializer {
 		options.damageTiltStrength().set(0.0);
 		options.menuBackgroundBlurriness().set(0);
 		options.enableVsync().set(false);
-		// the host shows ~60-120 fps: rendering faster only competes with it for the GPU
-		options.framerateLimit().set(120);
+		// Uncapped (260 = unlimited): every Minecraft frame shortens the gap the compositor
+		// must re-project across, which is what breaks block edges and Steve while moving.
+		options.framerateLimit().set(260);
 		options.save();
 	}
 

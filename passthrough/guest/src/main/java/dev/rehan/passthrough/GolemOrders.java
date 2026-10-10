@@ -40,7 +40,9 @@ public final class GolemOrders extends Goal {
     private Vec3 destination(){
         if(!(mob.level() instanceof net.minecraft.server.level.ServerLevel level))return null;
         Vec3 at=guard(mob);if(at!=null)return at;
-        if(!order(mob).equals(PREFIX+"follow"))return null;
+        // Attack (the default) and follow both regroup with the player while there is
+        // no target; otherwise a golem idles after its first kill until infected wander
+        // into its range.
         var players=level.getServer().getPlayerList().getPlayers();return players.isEmpty()?null:players.getFirst().position();
     }
     @Override public boolean canUse(){Vec3 p=destination();return Passthrough.active && MapBuilds.ready && mob.getTarget()==null && p!=null && mob.distanceToSqr(p)>9;}

@@ -84,6 +84,11 @@ public final class FrameExporter {
 		float far;
 		long frame;
 		long captureNanos;
+		/** Where the camera really rendered from (elytra chase cam differs from the host pose). */
+		double camX, camY, camZ;
+		/** Steve's feet relative to that camera, world axes; valid only when he is drawn. */
+		float steveX, steveY, steveZ;
+		boolean steve;
 
 		void allocate(final int w, final int h) {
 			this.free();
@@ -185,6 +190,18 @@ public final class FrameExporter {
 		c.far = far;
 		c.frame = ++frameCounter;
 		c.captureNanos = now;
+		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+		net.minecraft.world.phys.Vec3 cam = mc.gameRenderer.mainCamera().position();
+		c.camX = cam.x;
+		c.camY = cam.y;
+		c.camZ = cam.z;
+		c.steve = !pose.firstPerson() && mc.player != null && mc.gameRenderer.mainCamera().isDetached();
+		if (c.steve) {
+			net.minecraft.world.phys.Vec3 feet = mc.player.getPosition(mc.getDeltaTracker().getGameTimeDeltaPartialTick(true));
+			c.steveX = (float)(feet.x - cam.x);
+			c.steveY = (float)(feet.y - cam.y);
+			c.steveZ = (float)(feet.z - cam.z);
+		}
 		CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
 		encoder.copyTextureToBuffer(target.getColorTexture(), c.color, 0L, () -> {}, 0);
 		encoder.copyTextureToBuffer(target.getDepthTexture(), c.depth, 0L, () -> {}, 0);
@@ -244,9 +261,10 @@ public final class FrameExporter {
 			m.set(FLOAT, desc + 36, c.far);
 			m.set(FLOAT, desc + 40, p.fov());
 			m.set(INT, desc + 44, (RenderSystem.getDevice().getDeviceInfo().isZZeroToOne() ? 1 : 0) | 2 | 4);
-			m.set(DOUBLE, desc + 48, p.x());
-			m.set(DOUBLE, desc + 56, p.y());
-			m.set(DOUBLE, desc + 64, p.z());
+			// The camera Minecraft actually rendered from: re-projection is exact only for that pose.
+			m.set(DOUBLE, desc + 48, c.camX);
+			m.set(DOUBLE, desc + 56, c.camY);
+			m.set(DOUBLE, desc + 64, c.camZ);
 			m.set(FLOAT, desc + 72, p.yaw());
 			m.set(FLOAT, desc + 76, p.pitch());
 			m.set(FLOAT, desc + 80, p.roll());
@@ -254,6 +272,12 @@ public final class FrameExporter {
 			m.set(LONG, desc + 88, c.captureNanos);
 			m.set(LONG, desc + 96, publishedNanos);
 			m.set(LONG, desc + 104, p.scene());
+		// 112..127: Steve's feet relative to the camera (world axes) and a valid flag. Steve moves
+		// with the third-person camera, so the compositor must not translate his pixels.
+		m.set(FLOAT, desc + 112, c.steveX);
+		m.set(FLOAT, desc + 116, c.steveY);
+		m.set(FLOAT, desc + 120, c.steveZ);
+		m.set(INT, desc + 124, c.steve ? 1 : 0);
 			VarHandle.fullFence();
 			m.set(LONG, desc, seq + 2L);
 			m.set(INT, 40, slot);

@@ -14,6 +14,9 @@ public final class PlayerSync {
 	/** How far the host's player moved over the last client tick (drives the walk animation). */
 	private static float tickDistance;
 	private static double lastX = Double.NaN, lastZ;
+	/** Last host-driven position, kept while the host link is stale. */
+	private static double holdX, holdY, holdZ;
+	private static boolean holding;
 
 	private PlayerSync() {
 	}
@@ -21,6 +24,15 @@ public final class PlayerSync {
 	public static float tickDistance() {
 		return tickDistance;
 	}
+
+    /** Apply the newest Source aim before a queued item/attack input is handled. */
+    public static void syncAim() {
+        var p=HostState.live();
+        var player=Minecraft.getInstance().player;
+        if(p==null || player==null)return;
+        player.setYRot(p.lookYaw());
+        player.setXRot(p.lookPitch());
+    }
 
 	/** Every frame, before the camera update: position, rotation, and first/third person to match the host. */
 	public static void frame(final float partialTick) {
@@ -56,6 +68,8 @@ public final class PlayerSync {
         player.setSharedFlagOnFire(HostState.burning() || dev.rehan.passthrough.SurvivalFeatures.burning());
         minecraft.options.keyShift.setDown(HostState.isCrouching());
         float headYaw=p.firstPerson()?p.yaw():p.lookYaw();
+        // Physical throw/interaction pitch follows Source's aim in every F5
+        // view. The camera and avatar renderer own their visual pose.
         float headPitch=p.firstPerson()?p.pitch():p.lookPitch();
 		player.setYRot(headYaw);
 		player.setXRot(headPitch);
@@ -84,10 +98,19 @@ public final class PlayerSync {
 	 */
 	public static void tick(final LocalPlayer player) {
 		HostState.Pose p = HostState.live();
-		if (p == null || p.drive()) {
+		if (p == null) {
+			hold(player);
+			return;
+		}
+		if (p.drive()) {
+			holding = false;
 			return;
 		}
 
+        // Ticks can precede another render frame: send current aim with the
+        // movement packet rather than the last rendered angle.
+        player.setYRot(p.lookYaw());
+        player.setXRot(p.lookPitch());
 		double x = p.firstPerson() ? p.x() : p.px();
 		double y = p.firstPerson() ? p.y() - player.getEyeHeight() : p.py();
 		double z = p.firstPerson() ? p.z() : p.pz();
@@ -103,6 +126,40 @@ public final class PlayerSync {
 		}
 
 		player.setDeltaMovement(Vec3.ZERO);
+		holdX = x;
+		holdY = y;
+		holdZ = z;
+		holding = true;
+		boolean grounded=HostState.grounded();
+        dev.rehan.passthrough.ElytraBridge.hostGrounded(grounded);
+        player.setOnGround(grounded);
+        boolean wings=net.minecraft.world.entity.LivingEntity.canGlideUsing(
+            player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST),net.minecraft.world.entity.EquipmentSlot.CHEST);
+        if(grounded || !wings)player.stopFallFlying();
+		Abilities abilities = player.getAbilities();
+		if (abilities.mayfly && abilities.flying==wings) {
+			// Creative flight suppresses vanilla double-jump Elytra start. Source
+            // still owns movement; disabling this bit cannot transfer authority.
+            abilities.flying = !wings;
+			player.onUpdateAbilities();
+		}
+	}
+
+	/**
+	 * The host link dropped (bridge restart, tunnel off). The guest world has no ground under
+	 * the Source map, so vanilla gravity would drop Steve into the void and kill him repeatedly.
+	 * Hover at the last host position until a fresh pose arrives.
+	 */
+	private static void hold(final LocalPlayer player) {
+		// Only a real link loss. A hidden pose (cutscene, scene change, pinned camera) or
+		// Elytra flight must never teleport Steve back or close his wings.
+		if (!holding || player.isDeadOrDying() || player.isFallFlying() || !HostState.linkLost()) {
+			return;
+		}
+		player.stopFallFlying();
+		player.setDeltaMovement(Vec3.ZERO);
+		player.setPos(holdX, holdY, holdZ);
+		player.fallDistance = 0;
 		Abilities abilities = player.getAbilities();
 		if (abilities.mayfly && !abilities.flying) {
 			abilities.flying = true;

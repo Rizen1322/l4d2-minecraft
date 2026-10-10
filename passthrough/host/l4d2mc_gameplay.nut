@@ -9,6 +9,11 @@ if(!("nativeUseIntent" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.nativeUse
 if(!("usePulseUntil" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.usePulseUntil<-0.0;
 if(!("nativeUseDown" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.nativeUseDown<-false;
 if(!("useGapUntil" in L4D2MCBridge.gameplay))L4D2MCBridge.gameplay.useGapUntil<-0.0;
+if(!("consuming" in L4D2MCBridge.gameplay)){L4D2MCBridge.gameplay.consuming<-false;L4D2MCBridge.gameplay.consumeAt<- -100.0;}
+L4D2MCBridge.Consume <- function(f) {
+    if(f.len()!=2)return;local using=Integer(f[1]);if(using>1)return;
+    gameplay.consuming=using==1;gameplay.consumeAt=Time();
+};
 L4D2MCBridge.NativeUse <- function(pressed) {
     if(pressed==gameplay.nativeUseDown)return;
     // This is the real client command route, including L4D2's selected-use
@@ -41,12 +46,34 @@ L4D2MCBridge.Hide <- function(e) {
     if(!(id in gameplay.hidden) || gameplay.hidden[id].entity!=e)gameplay.hidden[id]<-{entity=e,old=(flags&32)!=0};
     NetProps.SetPropInt(e,"m_fEffects",flags|32);
 };
+// Client-side attachments (held melee, holstered sidearms) ignore their weapon
+// entity's flags but are drawn with the survivor; make the survivor transparent too.
+L4D2MCBridge.HideSurvivor <- function(player) {
+    Hide(player);
+    if(!NetProps.HasProp(player,"m_nRenderMode") || !NetProps.HasProp(player,"m_clrRender"))return;
+    local saved=gameplay.hidden[player.GetEntityIndex()];
+    local mode=NetProps.GetPropInt(player,"m_nRenderMode"),color=NetProps.GetPropInt(player,"m_clrRender");
+    if(!(mode==1 && (color&0xFF000000)==0)) {
+        saved.renderMode<-mode;
+        saved.renderColor<-color;
+    }
+    NetProps.SetPropInt(player,"m_nRenderMode",1);
+    NetProps.SetPropInt(player,"m_clrRender",color&0x00FFFFFF);
+};
 L4D2MCBridge.RestoreHidden <- function(id) {
     if(!(id in gameplay.hidden))return;
     local saved=gameplay.hidden[id],e=saved.entity;
     if(e.IsValid()) {
-        if(!saved.old)NetProps.SetPropInt(e,"m_fEffects",NetProps.GetPropInt(e,"m_fEffects")&(~32));
-        if("renderMode" in saved && NetProps.GetPropInt(e,"m_nRenderMode")==10)NetProps.SetPropInt(e,"m_nRenderMode",saved.renderMode);
+        // old==null: render-colour-only record (predicted viewmodel); never write its flags.
+        if(saved.old!=null) {
+            local flags=NetProps.GetPropInt(e,"m_fEffects");
+            NetProps.SetPropInt(e,"m_fEffects",saved.old?(flags|32):(flags&(~32)));
+        }
+        if("renderMode" in saved && "renderColor" in saved && NetProps.GetPropInt(e,"m_nRenderMode")==1 &&
+            (NetProps.GetPropInt(e,"m_clrRender")&0xFF000000)==0) {
+            NetProps.SetPropInt(e,"m_nRenderMode",saved.renderMode);
+            NetProps.SetPropInt(e,"m_clrRender",saved.renderColor);
+        }
     }
     delete gameplay.hidden[id];
 };
@@ -54,11 +81,43 @@ L4D2MCBridge.HideOwnedWeaponModel <- function(e,player,wanted) {
     if(e==null || !e.IsValid() || !NetProps.HasProp(e,"m_fEffects"))return;
     Hide(e);local id=e.GetEntityIndex(),saved=gameplay.hidden[id];
     saved.weaponOwner<-player;wanted[id]<-e;
-    // World/bonemerge models can have their visibility refreshed by camera changes.
-    if(NetProps.HasProp(e,"m_nRenderMode")) {
-        if(!("renderMode" in saved))saved.renderMode<-NetProps.GetPropInt(e,"m_nRenderMode");
-        NetProps.SetPropInt(e,"m_nRenderMode",10); // kRenderNone, not a global rendering setting.
+    // The client draws an owner's active weapon in third person regardless of
+    // EF_NODRAW/kRenderNone; only a transparent render colour hides it.
+    if(NetProps.HasProp(e,"m_nRenderMode") && NetProps.HasProp(e,"m_clrRender")) {
+        local mode=NetProps.GetPropInt(e,"m_nRenderMode"),color=NetProps.GetPropInt(e,"m_clrRender");
+        if(!(mode==1 && (color&0xFF000000)==0)) {
+            saved.renderMode<-mode;
+            saved.renderColor<-color;
+        }
+        NetProps.SetPropInt(e,"m_nRenderMode",1); // kRenderTransColor
+        NetProps.SetPropInt(e,"m_clrRender",color&0x00FFFFFF);
     }
+};
+// Render-colour-only hiding for client-predicted models; restored by RestoreHidden.
+L4D2MCBridge.TransparentModel <- function(e) {
+    if(e==null || !e.IsValid() || !NetProps.HasProp(e,"m_nRenderMode") || !NetProps.HasProp(e,"m_clrRender"))return;
+    local id=e.GetEntityIndex();
+    if(!(id in gameplay.hidden) || gameplay.hidden[id].entity!=e)gameplay.hidden[id]<-{entity=e,old=null};
+    local saved=gameplay.hidden[id];
+    local mode=NetProps.GetPropInt(e,"m_nRenderMode"),color=NetProps.GetPropInt(e,"m_clrRender");
+    if(!(mode==1 && (color&0xFF000000)==0)) {
+        saved.renderMode<-mode;
+        saved.renderColor<-color;
+    }
+    if(mode!=1)NetProps.SetPropInt(e,"m_nRenderMode",1);
+    if((color&0xFF000000)!=0)NetProps.SetPropInt(e,"m_clrRender",color&0x00FFFFFF);
+};
+// Ownership must lead to this survivor or an inventory weapon within four parent/owner hops.
+L4D2MCBridge.OwnedAttachment <- function(attachment,player,wanted) {
+    local current=attachment;
+    for(local depth=0;depth<4 && current!=null && current.IsValid();depth++) {
+        if(current==player || (current.GetEntityIndex() in wanted && wanted[current.GetEntityIndex()]==current))return true;
+        local owner=NetProps.HasProp(current,"m_hOwnerEntity")?NetProps.GetPropEntity(current,"m_hOwnerEntity"):null;
+        if(owner==player || (owner!=null && owner.IsValid() && owner.GetEntityIndex() in wanted && wanted[owner.GetEntityIndex()]==owner))return true;
+        current=NetProps.HasProp(current,"m_hMoveParent")?NetProps.GetPropEntity(current,"m_hMoveParent"):
+            NetProps.HasProp(current,"moveparent")?NetProps.GetPropEntity(current,"moveparent"):null;
+    }
+    return false;
 };
 L4D2MCBridge.HidePlayerWeapons <- function(player) {
     local wanted={};
@@ -71,8 +130,39 @@ L4D2MCBridge.HidePlayerWeapons <- function(player) {
         }
     }
     if(NetProps.HasProp(player,"m_hActiveWeapon"))HideOwnedWeaponModel(NetProps.GetPropEntity(player,"m_hActiveWeapon"),player,wanted);
+    // predicted_viewmodel: the client toggles its EF_NODRAW while deploying, so a server
+    // write to that flag makes it replay the deploy (constant draw/holster sound). Use
+    // the render colour only.
     if(NetProps.HasProp(player,"m_hViewModel"))
-        for(local i=0;i<NetProps.GetPropArraySize(player,"m_hViewModel");i++)HideOwnedWeaponModel(NetProps.GetPropEntityArray(player,"m_hViewModel",i),player,wanted);
+        for(local i=0;i<NetProps.GetPropArraySize(player,"m_hViewModel");i++)
+            TransparentModel(NetProps.GetPropEntityArray(player,"m_hViewModel",i));
+    // Bonemerged models are sometimes separate entities rather than the
+    // weapon's world-model handle. Ownership must lead to this survivor or an
+    // inventory weapon; never hide map pickups or another survivor's equipment.
+    // The full entity scan is the most expensive part of the 30 Hz tick. Run it four
+    // times a second; between scans re-check only the attachments it found, so a
+    // detached/dropped model is still restored on the very next tick.
+    if(!("attachments" in gameplay))gameplay.attachments<-{};
+    if(!("attachmentScanAt" in gameplay))gameplay.attachmentScanAt<--100.0;
+    local now=Time();
+    local scan=now-gameplay.attachmentScanAt>=0.25 || now<gameplay.attachmentScanAt;
+    local cachedIds=[];foreach(id,cached in gameplay.attachments)if(cached.owner==player)cachedIds.append(id);
+    if(scan) {
+        gameplay.attachmentScanAt=now;
+        foreach(id in cachedIds)delete gameplay.attachments[id];
+        if("Entities" in getroottable())foreach(pattern in ["weapon_*","prop_dynamic","prop_dynamic_override"]) {
+            local attachment=null,scanned=0;
+            while((attachment=Entities.FindByClassname(attachment,pattern))!=null && ++scanned<=512) {
+                if(!attachment.IsValid() || !OwnedAttachment(attachment,player,wanted))continue;
+                HideOwnedWeaponModel(attachment,player,wanted);
+                gameplay.attachments[attachment.GetEntityIndex()]<-{entity=attachment,owner=player};
+            }
+        }
+    } else foreach(id in cachedIds) {
+        local cached=gameplay.attachments[id];
+        if(cached.entity.IsValid() && OwnedAttachment(cached.entity,player,wanted))HideOwnedWeaponModel(cached.entity,player,wanted);
+        else delete gameplay.attachments[id];
+    }
     // Never leave a dropped gun/quest item invisible after it leaves this survivor.
     local restore=[];
     foreach(id,saved in gameplay.hidden)if("weaponOwner" in saved && saved.weaponOwner==player && (!(id in wanted) || wanted[id]!=saved.entity))restore.append(id);
@@ -80,6 +170,13 @@ L4D2MCBridge.HidePlayerWeapons <- function(player) {
 };
 L4D2MCBridge.RestoreAppearance <- function() {
     NativeUse(false);gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;
+    gameplay.consuming=false;gameplay.consumeAt=-100.0;
+    if("FlightCleanup" in this) {
+        local owner=("coop" in this && coop.current!=null)?coop.current.player:
+            (("survival" in this && "player" in survival)?survival.player:null);
+        if(owner==null && "CoopListenHost" in this)owner=CoopListenHost();
+        if(owner!=null)FlightCleanup(owner);else if(!("coop" in this))FlightCleanup();
+    }
     if("SurvivalCleanup" in this)SurvivalCleanup();
     local hiddenIds=[];foreach(id,v in gameplay.hidden)hiddenIds.append(id);
     foreach(id in hiddenIds)RestoreHidden(id);
@@ -108,7 +205,14 @@ L4D2MCBridge.Movement <- function(player,gui,sprint) {
     }
     // Retain Source acceleration/jumping; potion speed only multiplies its native movement scale.
     local factor=("effectsAt" in survival && Time()-survival.effectsAt<0.75)?survival.speed:1.0;
+    if(!gui && gameplay.consuming && Time()-gameplay.consumeAt<0.75 && GameplayLease()
+        && !player.IsDead() && !player.IsIncapacitated())factor*=0.2;
     if(factor!=1.0 && !gui) {
+        if(id in gameplay.movement && gameplay.movement[id].entity!=player) {
+            local previous=gameplay.movement[id];
+            if(previous.entity.IsValid())NetProps.SetPropFloat(previous.entity,"m_flLaggedMovementValue",previous.old);
+            delete gameplay.movement[id];
+        }
         if(!(id in gameplay.movement))gameplay.movement[id]<-{entity=player,old=NetProps.GetPropFloat(player,"m_flLaggedMovementValue")};
         NetProps.SetPropFloat(player,"m_flLaggedMovementValue",gameplay.movement[id].old*factor);
     } else if(id in gameplay.movement) {
@@ -339,7 +443,8 @@ L4D2MCBridge.Event <- function(fields,player) {
         if(id in gameplay.replies)delete gameplay.replies[id];
     } else if(kind=="interact" && fields.len()==3) {
         local held=player.GetActiveWeapon();
-        if(held!=null && (CarryItem(held.GetClassname()) || held.GetClassname()=="weapon_melee")) {
+        // Only carried props drop; the hidden melee is the converted sidearm, not a carry item.
+        if(held!=null && CarryItem(held.GetClassname())) {
             player.DropItem(held.GetClassname());survival.dropLatch<-true;
             NativeUse(false);gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;return;
         }
@@ -356,12 +461,20 @@ L4D2MCBridge.Event <- function(fields,player) {
     } else throw "invalid event";
 };
 L4D2MCBridge.Projectile <- function(fields,player) {
-    if(fields.len()!=6 && fields.len()!=7)throw "invalid projectile";
+    if(fields.len()!=6 && fields.len()!=7 && fields.len()!=10)throw "invalid projectile";
     local id=Integer(fields[1]);
     local p=Vector(Number(fields[3]),Number(fields[4]),Number(fields[5]));
+    local launch=fields.len()==10 && !(id in gameplay.projectiles);
+    if(launch) {
+        // The mailbox keeps the newest snapshot. Preserve the actual launch
+        // point so even a fast pearl's first segment cannot pass through a wall.
+        local origin=Vector(Number(fields[7]),Number(fields[8]),Number(fields[9]));
+        gameplay.projectiles[id]<-{pos=origin,at=Time(),hit=false};
+    }
     if(id in gameplay.projectiles) {
         local before=gameplay.projectiles[id];
-        if(Time()-before.at<0.5 && (p-before.pos).Length()<512) {
+        local distance=(p-before.pos).Length();
+        if(!before.hit && Time()-before.at<0.5 && distance>0.001 && distance<(launch?4096:512)) {
             local trace=Raycast(before.pos,p,player);
             if("hit" in trace && trace.hit) {
                 local own="enthit" in trace && trace.enthit!=null &&
@@ -371,8 +484,9 @@ L4D2MCBridge.Projectile <- function(fields,player) {
                         local back=before.pos-p;
                         if(back.Length()>0.01)back=back*(24.0/back.Length());
                         if(TeleportPlayer(player,trace.pos+back))player.TakeDamage(5,0,null);
-                    } else if("enthit" in trace && IsCombatTarget(trace.enthit)) {
-                        local damage=fields.len()==7?Number(fields[6],1500):(fields[2]=="firework"?80:60);
+                    } else if(fields[2]!="thrown" && "enthit" in trace && IsCombatTarget(trace.enthit)) {
+                        // Thrown potions/snowballs/eggs only break here; Minecraft applies their effect.
+                        local damage=fields.len()>=7?Number(fields[6],1500):(fields[2]=="firework"?80:60);
                         if(damage<0)throw "invalid projectile damage";
                         trace.enthit.TakeDamage(damage,2,player);
                     }
@@ -441,8 +555,8 @@ L4D2MCBridge.GroundPhysics <- function() {
         NetProps.SetPropInt(value.proxy,"m_Collision.m_usSolidFlags",flags|4);
     }
     local restore=function(){foreach(v in masked)if(v[0].IsValid())NetProps.SetPropInt(v[0],"m_Collision.m_usSolidFlags",v[1]);};
-    // Bound wider body probes to six entities per think.
-    try { for(local i=0;i<6 && i<list.len();i++) {
+    // Bound wider body probes to three entities per think (each body probe is ~50 traces).
+    try { for(local i=0;i<3 && i<list.len();i++) {
         local index=(gameplay.physIndex+i)%list.len(),id=list[index],v=gameplay.physics[id];
         local p=v.pos,ignore=v.proxy;
         local trace={start=p+Vector(0,0,8),end=p-Vector(0,0,512),ignore=ignore,mask=16395};
@@ -530,11 +644,11 @@ L4D2MCBridge.GroundPhysics <- function() {
     }
     } catch(error){restore();throw error;}
     restore();
-    gameplay.physIndex=(gameplay.physIndex+6)%list.len();
+    gameplay.physIndex=(gameplay.physIndex+3)%list.len();
 };
 L4D2MCBridge.GameplayLease <- function() { return gameplay.armed && Time()-gameplay.at<=0.5; };
-L4D2MCBridge.ReadGameplay <- function(player) {
-    local text=FileToString("l4d2mc_gameplay.txt");
+L4D2MCBridge.ReadGameplay <- function(player,path="l4d2mc_gameplay.txt") {
+    local text=FileToString(path);
     if(text==null || text.len()>32768)return GameplayLease();
     local lines=split(text,"\r\n");if(lines.len()<1 || lines.len()>384)return GameplayLease();
     local header=split(lines[0]," ");
@@ -542,17 +656,20 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     if(header[1]!=Director.GetMapName() || header[8]!=epoch.tostring())return false;
     if(header[2]=="0" && TotemPendingFor(player)) {
         NativeUse(false);gameplay.nativeUseIntent=false;gameplay.usePulseUntil=0.0;gameplay.useGapUntil=0.0;
+        gameplay.consuming=false;gameplay.consumeAt=-100.0;if("FlightCleanup" in this)FlightCleanup(player);
         if(header[0]!=gameplay.generation){gameplay.generation=header[0];gameplay.lastEvent=0;gameplay.content=null;gameplay.armed=false;}
         // A spectating/dead frame permits only the existing durable rescue.
         for(local i=1;i<lines.len()-1;i++) {
             local f=split(lines[i]," ");
             if(f.len()>=3 && f[0]=="event" && (f[2]=="totemresult" || f[2]=="replyack"))
                 try{Event(f,player);}catch(error){printl("[L4D2MC TOTEM] "+error);}
+            else if(f.len()==2 && f[0]=="replyack")try{local id=Integer(f[1]);if(id in gameplay.replies)delete gameplay.replies[id];}catch(error){printl("[L4D2MC ACK] "+error);}
         }
         TotemTick(player);return true;
     }
     if(header[2]!="1")return false;
     if(header[0]!=gameplay.generation) {
+        if("FlightCleanup" in this)FlightCleanup(player);gameplay.consuming=false;gameplay.consumeAt=-100.0;
         gameplay.generation=header[0];gameplay.lastEvent=0;gameplay.projectiles.clear();gameplay.replies.clear();gameplay.armed=false;gameplay.content=null;
     }
     if(gameplay.content==null) {
@@ -568,9 +685,11 @@ L4D2MCBridge.ReadGameplay <- function(player) {
     if(!gameplay.armed)return false;
     if(Time()-gameplay.at>0.5)return false;
     survival.fireZones.clear();
+    gameplay.consuming=false;gameplay.consumeAt=-100.0;
     for(local i=1;i<lines.len()-1;i++) {
         local f=split(lines[i]," ");
         if(f.len()>0 && f[0]=="event")try{Event(f,player);}catch(error){printl("[L4D2MC EVENT] "+error);}
+        else if(f.len()==2 && f[0]=="replyack")try{local id=Integer(f[1]);if(id in gameplay.replies)delete gameplay.replies[id];}catch(error){printl("[L4D2MC ACK] "+error);}
         else if(f.len()>0 && f[0]=="golem")try{GolemTarget(f,player);}catch(error){printl("[L4D2MC GOLEM] "+error);}
         else if(f.len()>0 && f[0]=="nav")try{NavRequest(f,player);}catch(error){printl("[L4D2MC NAV] "+error);}
         else if(f.len()>0 && f[0]=="projectile")try{Projectile(f,player);}catch(error){printl("[L4D2MC PROJECTILE] "+error);}
@@ -579,12 +698,15 @@ L4D2MCBridge.ReadGameplay <- function(player) {
         else if(f.len()>0 && f[0]=="effects")try{Effects(f);}catch(error){printl("[L4D2MC EFFECTS] "+error);}
         else if(f.len()>0 && f[0]=="fire")try{FireZone(f,player);}catch(error){printl("[L4D2MC FIRE] "+error);}
         else if(f.len()>0 && f[0]=="totemheld")try{TotemHeld(f);}catch(error){printl("[L4D2MC TOTEM] "+error);}
+        else if(f.len()==5 && f[0]=="flight")try{Flight(f,player);}catch(error){printl("[L4D2MC FLIGHT] "+error);}
+        else if(f.len()==2 && f[0]=="consume")try{Consume(f);}catch(error){printl("[L4D2MC CONSUME] "+error);}
         else if(f.len()>0 && f[0]=="equipment")try{Equipment(f,player);}catch(error){printl("[L4D2MC EQUIPMENT] "+error);}
         else if(f.len()>0 && f[0]=="physics")try{Physics(f,player);}catch(error){printl("[L4D2MC PHYSICS] "+error);}
     }
     HeldActions(player,header.len()==9 && header[6]=="1",header.len()==9 && header[7]=="1",header[4]=="1");
-    Hide(player);
+    HideSurvivor(player);
     Movement(player,header[4]=="1",header[5]=="1");
+    if("FlightTick" in this)FlightTick(player);
     GroundPhysics();
     SurvivalTick(player);
     try{NavTick();}catch(error){printl("[L4D2MC NAV] "+error);navigation.jobs.clear();}

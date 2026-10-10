@@ -4,6 +4,13 @@ Source owns movement/health/native actors/map scene; guest owns Minecraft
 items/blocks/UI. Python bridges local WebSocket25601, mailboxes and shared memory;
 x86 add-on pairs colour/depth/UI with scene/camera.
 
+Optional `coop.py` LANroom relays actor-specific snapshots to each PC. Source
+listen host owns the four-survivor contexts; clients never execute server VM
+commands. `RoomPath` routes gameplay/collision payloads and pickup/reward outboxes.
+Room sockets authenticate a private token, enforce Source scene/actor ownership,
+retain deletion tombstones and bound resync/backlogs. Source frame freshness is
+tracked independently of packet traffic. See [LAN setup](COOP.md).
+
 Components: `passthrough/host/` gameplay/survival/navigation; `guest/` Fabric;
 `bridge.py` transport; `native/` and `shaders/` compositing/cursor; `tools/`
 private HUD derivation. Build parameters in INSTALL.md; Java25 required.

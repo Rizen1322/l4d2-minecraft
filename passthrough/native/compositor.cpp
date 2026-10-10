@@ -78,6 +78,8 @@ namespace
 	uint64_t g_hostScene = 0, g_mcScene = 0;
 	float g_mcNear = 0.05f, g_mcFar = 2048.0f;
 	int32_t g_mcFlags = 7;
+	// Steve's feet relative to Minecraft's camera (world axes) and a valid flag, from the frame descriptor.
+	float g_mcSteve[4] = {0, 0, 0, 0};
 
 	template <typename T>
 	T read(const uint8_t *p)
@@ -231,36 +233,31 @@ namespace
 			g_height = h;
 			bind(runtime);
 		}
+		// Stream straight from shared memory into the back layers (one copy, not two).
+		// A slot rewritten during the copy is detected afterwards and the back layers
+		// are simply not swapped in, so a torn frame never becomes visible.
 		const uint8_t *base = g_view + kHeader + g_stride * slot;
 		const size_t layer = size_t(w) * h * 4;
-		static std::vector<uint8_t> snapshot;
-		snapshot.resize(layer * 3);
-		std::memcpy(snapshot.data(), base, snapshot.size());
-		MemoryBarrier();
-        if (read<int64_t>(sharedDesc) != seq)
-			return;
-		base = snapshot.data();
-        auto stream = [&](Layer& layer,const uint8_t* pixels,bool rgba) {
+        // Plain copies: Source's D3D9 texture is A8R8G8B8 and guest bytes are RGBA;
+        // the effect swaps red/blue on read (.bgra), which costs nothing on the GPU.
+        auto stream = [&](Layer& layer,const uint8_t* pixels) {
             subresource_data mapped{};
             if (!dev->map_texture_region(layer.tex,0,nullptr,map_access::write_discard,&mapped)) return false;
-            for(uint32_t y=0;y<h;y++) {
-                auto dst=static_cast<uint8_t*>(mapped.data)+size_t(y)*mapped.row_pitch;
-                const auto src=pixels+size_t(y)*w*4;
-                if (rgba) {
-                    auto input=reinterpret_cast<const uint32_t*>(src);
-                    auto output=reinterpret_cast<uint32_t*>(dst);
-                    // Source's D3D9 texture is A8R8G8B8; guest bytes are RGBA.
-                    for(uint32_t x=0;x<w;x++){uint32_t c=input[x];output[x]=(c&0xff00ff00)|((c&0xff)<<16)|((c>>16)&0xff);}
-                } else std::memcpy(dst,src,size_t(w)*4);
-            }
+            const size_t row=size_t(w)*4;
+            if (mapped.row_pitch==row) std::memcpy(mapped.data,pixels,row*h);
+            else for(uint32_t y=0;y<h;y++)
+                std::memcpy(static_cast<uint8_t*>(mapped.data)+size_t(y)*mapped.row_pitch,pixels+size_t(y)*row,row);
             dev->unmap_texture_region(layer.tex,0);
             return true;
         };
-        if (!stream(g_worldBack,base,true) || !stream(g_depthBack,base+layer,false) || !stream(g_overlayBack,base+2*layer,true)) {
+        if (!stream(g_worldBack,base) || !stream(g_depthBack,base+layer) || !stream(g_overlayBack,base+2*layer)) {
             static DWORD nextLog=0;
             if(GetTickCount()>nextLog){reshade::log::message(reshade::log::level::warning,"MC frame upload failed; retaining previous complete frame");nextLog=GetTickCount()+5000;}
             return;
         }
+        MemoryBarrier();
+        if (read<int64_t>(sharedDesc) != seq)
+            return; // the guest reused this slot mid-copy: keep showing the previous complete frame
         std::swap(g_world,g_worldBack);std::swap(g_depth,g_depthBack);std::swap(g_overlay,g_overlayBack);
         bind(runtime);
 
@@ -278,6 +275,10 @@ namespace
 		g_mcPose.x = read<double>(desc + 48);
 		g_mcPose.y = read<double>(desc + 56);
 		g_mcPose.z = read<double>(desc + 64);
+		g_mcSteve[0] = read<float>(desc + 112);
+		g_mcSteve[1] = read<float>(desc + 116);
+		g_mcSteve[2] = read<float>(desc + 120);
+		g_mcSteve[3] = read<int32_t>(desc + 124) == 1 && std::isfinite(g_mcSteve[0] + g_mcSteve[1] + g_mcSteve[2]) ? 1.0f : 0.0f;
 		g_mcPose.valid = true;
 		g_hasFrame = true;
 		g_mcScene = scene;
@@ -348,12 +349,14 @@ namespace
 		last = info.ftLastWriteTime;
 	}
 
+    std::atomic<bool> g_wheelEnabled{false};
     bool cursor_gameplay_verified() {
         return !g_reshadeMenu.load() && !source_camera::menu_visible() && source_camera::gameplay_visible();
     }
+    bool wheel_gameplay_verified() { return g_wheelEnabled.load() && cursor_gameplay_verified(); }
     bool on_open_overlay(effect_runtime*,bool open,reshade::api::input_source) {
         g_reshadeMenu=open;
-        if(open)source_cursor::hide=false;
+        if(open){source_cursor::hide=false;g_wheelEnabled=false;}
         return false;
     }
 	void on_present(effect_runtime *runtime)
@@ -364,7 +367,9 @@ namespace
         const bool guestGui=g_guestUiOpen && g_guestInputAlive;
         const bool worldCursor=g_cursorAttached && !hostMenu && !guestGui
             && source_camera::gameplay_visible() && GetForegroundWindow()==runtime->get_hwnd();
-        source_cursor::publish(static_cast<HWND>(runtime->get_hwnd()),worldCursor,cursor_gameplay_verified);
+        g_wheelEnabled=g_active && g_sceneVisible && g_guestInputAlive && !hostMenu;
+        source_cursor::publish(static_cast<HWND>(runtime->get_hwnd()),worldCursor,cursor_gameplay_verified,wheel_gameplay_verified);
+        source_camera::publish_wheel(source_cursor::wheelUnits.load());
 		watch_effect_file(runtime);
         if(hostMenu) {
             while(g_cursorShows>0){ShowCursor(FALSE);--g_cursorShows;}
@@ -493,6 +498,23 @@ namespace
 				runtime->set_uniform_value_float(v, m[i][0], m[i][1], m[i][2]);
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "WarpT"); v.handle != 0)
 			runtime->set_uniform_value_float(v, t[0], t[1], t[2]);
+		// Steve moves with the third-person camera: give the effect his feet and the world up
+		// direction in Minecraft's camera space so his pixels are taken without translation.
+		{
+			float rs[3][3];
+			camera_rotation(g_mcPose, rs);
+			float s[3], up[3];
+			for (int i = 0; i < 3; ++i)
+			{
+				s[i] = rs[0][i] * g_mcSteve[0] + rs[1][i] * g_mcSteve[1] + rs[2][i] * g_mcSteve[2];
+				up[i] = rs[1][i];
+			}
+			const float on = warp && g_mcPose.valid ? g_mcSteve[3] : 0.0f;
+			if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "SteveCam"); v.handle != 0)
+				runtime->set_uniform_value_float(v, s[0], s[1], s[2], on);
+			if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "SteveUp"); v.handle != 0)
+				runtime->set_uniform_value_float(v, up[0], up[1], up[2]);
+		}
 		const float d2r = 3.14159265f / 180.0f;
 		const float tanHost = std::tan((warp ? host.fov : g_mcPose.fov) * d2r * 0.5f), tanMc = std::tan(g_mcPose.fov * d2r * 0.5f);
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "WarpTan"); v.handle != 0)

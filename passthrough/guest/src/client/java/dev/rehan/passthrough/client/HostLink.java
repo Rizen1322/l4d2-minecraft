@@ -102,7 +102,7 @@ public final class HostLink extends WebSocketServer {
 
     private static final java.util.Set<String> SOURCE_TASKS=java.util.Set.of(
         "hosthealth","peds","physground","projhit","equipmenthit","shieldcooldown","breakblock",
-        "mobdmg","mobpos","navpath","supply","blocksync","totemrequest","totemapplied");
+        "mobdmg","mobpos","navpath","supply","blocksync","totemrequest","totemapplied","coopblocks","coopbootstrap","glide","peerattack");
     private final dev.rehan.passthrough.ReplyTracker replies=new dev.rehan.passthrough.ReplyTracker();
     private record SnapshotKey(long scene,long generation,String type) {}
     private final dev.rehan.passthrough.LatestTaskQueue<SnapshotKey> latestSnapshots=new dev.rehan.passthrough.LatestTaskQueue<>();
@@ -112,6 +112,8 @@ public final class HostLink extends WebSocketServer {
     private void queueSource(WebSocket conn,JsonObject m){
         if(!m.has("scene"))return;
         long scene=m.get("scene").getAsLong(),generation=controllerGeneration;
+        long roomReceipt=m.has("roomreceipt")?Long.parseLong(m.get("roomreceipt").getAsString()):0;
+        if(m.has("roomreceipt") && roomReceipt<=0)return;
         int rid=m.has("rid")?m.get("rid").getAsInt():0;
         if(rid<0)return;
         var server=WorldBridge.server();
@@ -130,6 +132,9 @@ public final class HostLink extends WebSocketServer {
             if(conn!=controller || generation!=controllerGeneration || WorldBridge.server()!=server || !dev.rehan.passthrough.MapBuilds.ready || scene!=dev.rehan.passthrough.MapBuilds.scene())return;
             dispatch(conn,m);
             success=true;
+            // Nested WorldBridge.serverWork runs inline on this server thread,
+            // so attacks and accepted block updates precede their delivery ACK.
+            if(roomReceipt>0)Passthrough.events.accept("{\"t\":\"roomack\",\"id\":"+roomReceipt+",\"scene\":"+scene+"}");
             if(rid>0)ackReply(rid);
         }catch(RuntimeException error){Passthrough.LOG.warn("Source reply not applied; retained for retry",error);}
         finally{if(rid>0)replies.finish(scene,replyOwner,rid,success);}};
@@ -153,7 +158,22 @@ public final class HostLink extends WebSocketServer {
                 }
 				case "world" -> dev.rehan.passthrough.MapBuilds.select(m.get("map").getAsString(),m.has("epoch")?m.get("epoch").getAsLong():0,m.has("scene")?m.get("scene").getAsLong():0);
                 case "cam" -> HostState.update(m);
+                case "peerattack" -> dev.rehan.passthrough.PeerCombat.attack(m);
+                case "peers" -> {
+                    long owner=controllerGeneration,scene=m.get("scene").getAsLong();
+                    Minecraft.getInstance().execute(()->{
+                        if(controller==conn && controllerGeneration==owner && scene==dev.rehan.passthrough.MapBuilds.scene())HostState.peers(m);
+                    });
+                }
+                case "peerentities" -> {
+                    long owner=controllerGeneration,scene=m.get("scene").getAsLong();
+                    Minecraft.getInstance().execute(()->{
+                        if(controller==conn && controllerGeneration==owner && scene==dev.rehan.passthrough.MapBuilds.scene())PeerEntities.update(m);
+                    });
+                }
 				case "surface" -> HostState.surface(m);
+                case "coopblocks" -> dev.rehan.passthrough.CoopBlocks.apply(m);
+                case "coopbootstrap" -> dev.rehan.passthrough.CoopBlocks.snapshot();
                 case "physground" -> HostTerrain.update(m.getAsJsonArray("p"));
                 case "ground" -> {} // Retired: Source supports are virtual, never world blocks.
 				case "clear" -> WorldBridge.clearSolid();

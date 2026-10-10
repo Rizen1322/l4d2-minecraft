@@ -1,6 +1,7 @@
 // Local, listen-server prototype. No movement ownership changes.
 ::L4D2MCPreviousGameplay <- null;
 if ("L4D2MCBridge" in getroottable()) {
+    if("CoopCleanupAll" in L4D2MCBridge)L4D2MCBridge.CoopCleanupAll();
     if("gameplay" in L4D2MCBridge) {
         L4D2MCBridge.RestoreAppearance();
         L4D2MCPreviousGameplay=L4D2MCBridge.gameplay;
@@ -27,9 +28,12 @@ foreach(staleClass in ["prop_dynamic","prop_dynamic_override"]) {
 foreach(prop in staleMobProps)if(prop.IsValid())prop.Kill();
 PrecacheModel("models/l4d2mc/cube.mdl");
 ::L4D2MCBridge <- { frame = 0, epoch=RandomInt(1,2000000000), anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
+IncludeScript("l4d2mc_flight");
+IncludeScript("l4d2mc_coop");
 IncludeScript("l4d2mc_gameplay");
 IncludeScript("l4d2mc_survival");
 IncludeScript("l4d2mc_navigation");
+L4D2MCBridge.CoopInit();
 L4D2MCBridge.ClearCollision <- function() {
     foreach (key, block in blocks) if (block.IsValid()) block.Kill();
     blocks.clear();
@@ -126,20 +130,7 @@ L4D2MCBridge.TeamHudJson <- function(player) {
     }
     return out+"]";
 };
-L4D2MCBridge.anchor = SpawnEntityFromTable("info_target", { targetname = "l4d2mc_bridge" });
-L4D2MCBridge.anchor.ValidateScriptScope();
-L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
-    if (Time() - L4D2MCBridge.collisionChangedAt > 3.0)
-        L4D2MCBridge.ClearCollision();
-    local player = null;
-    local entity = null;
-    while ((entity = Entities.FindByClassname(entity, "player")) != null) {
-        if (!IsPlayerABot(entity) && entity.IsSurvivor() && (!entity.IsDead() || ("TotemPendingFor" in L4D2MCBridge && L4D2MCBridge.TotemPendingFor(entity)))) {
-            player = entity; break;
-        }
-    }
-    if (player == null) {L4D2MCBridge.RestoreAppearance();return 0.033;}
-    if(!L4D2MCBridge.ReadGameplay(player))L4D2MCBridge.RestoreAppearance();
+L4D2MCBridge.ActorPoseJson <- function(player) {
     local p = player.EyePosition();
     local feet = player.GetOrigin();
     local a = player.EyeAngles();
@@ -186,22 +177,23 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
     while((teammate=Entities.FindByClassname(teammate,"player"))!=null)
         if(teammate!=player && teammate.IsSurvivor())teammates++;
     if(teammates>3)teammates=3;
+    // Ledge hangs use a scripted camera and frozen controls, but the survivor stays in the scene.
+    local hanging=player.IsHangingFromLedge();
     local visible=true;
     if(NetProps.HasProp(player,"m_hViewEntity")) {
         local view=NetProps.GetPropEntity(player,"m_hViewEntity");
-        if(view!=null && view!=player && !pinned)visible=false;
+        if(view!=null && view!=player && !pinned && !hanging)visible=false;
     }
     if((NetProps.GetPropInt(player,"m_fFlags")&32)!=0) {
         local id=player.GetEntityIndex();
         local own=id in L4D2MCBridge.gameplay.frozen && L4D2MCBridge.gameplay.frozen[id].entity==player && !L4D2MCBridge.gameplay.frozen[id].old;
-        if(!own && !pinned)visible=false;
+        if(!own && !pinned && !hanging)visible=false;
     }
     local burning=(NetProps.GetPropInt(player,"m_fFlags")&134217728)!=0;
     local flame=NetProps.HasProp(player,"m_hEffectEntity")?NetProps.GetPropEntity(player,"m_hEffectEntity"):null;
     if(flame!=null && flame.IsValid() && flame.GetClassname()=="entityflame")burning=true;
     local carried=player.GetActiveWeapon();
     local carrying=carried!=null && L4D2MCBridge.CarryItem(carried.GetClassname());
-    L4D2MCBridge.frame++;
     local data = format("{\"v\":1,\"f\":%d,\"map\":\"%s\",\"p\":[%.6f,%.6f,%.6f],\"feet\":[%.6f,%.6f,%.6f],\"r\":[%.6f,%.6f,%.6f],\"hfov\":%d,\"hit\":%s,\"normal\":%s,\"buttons\":%d}",
         L4D2MCBridge.frame, Director.GetMapName(), p.x,p.y,p.z,feet.x,feet.y,feet.z,a.y,a.x,a.z,fov,surface,normal,player.GetButtonMask());
     data=data.slice(0,data.len()-1)+",\"burning\":"+(burning?"true":"false")+"}";
@@ -217,17 +209,36 @@ L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
         if(temporary<0)temporary=0;
     }
     data=data.slice(0,data.len()-1)+format(",\"health\":[%d,%.3f,%d,%s]}",player.GetHealth(),temporary,maxHp,player.IsIncapacitated() || player.GetHealth()<=0?"true":"false");
-    data=data.slice(0,data.len()-1)+",\"visible\":"+(visible?"true":"false")+",\"nativeuse\":false"+",\"usable\":"+(L4D2MCBridge.Usable(player)?"true":"false")+",\"actors\":"+L4D2MCBridge.ActorJson(player)+",\"wheel\":"+L4D2MCBridge.gameplay.wheel+",\"replies\":[";
-    local replyCount=0;foreach(id,reply in L4D2MCBridge.gameplay.replies)data+=(replyCount++==0?"":",")+reply;
+    data=data.slice(0,data.len()-1)+",\"visible\":"+(visible?"true":"false")+",\"nativeuse\":"+(gameplay.nativeUseDown?"true":"false")+",\"usable\":"+(L4D2MCBridge.Usable(player)?"true":"false")+",\"actors\":"+L4D2MCBridge.ActorJson(player)+",\"wheel\":"+L4D2MCBridge.gameplay.wheel+",\"replies\":[";
+    local replyCount=0,replyBytes=0;foreach(id,reply in gameplay.replies){if(replyBytes+reply.len()>8192)continue;data+=(replyCount++==0?"":",")+reply;replyBytes+=reply.len();}
     data+= "],\"physground\":[";
     for(local i=0;i<L4D2MCBridge.gameplay.ground.len();i++)data+=(i==0?"":",")+L4D2MCBridge.gameplay.ground[i];
     data+="]}";
-    StringToFile("l4d2mc_pose.txt", data);
-    if (Time() >= L4D2MCBridge.collisionAt) {
-        L4D2MCBridge.collisionAt = Time() + 0.25;
-        try { L4D2MCBridge.SyncCollision(); } catch (error) { printl("[L4D2MC COLLISION] " + error); }
+    data=data.slice(0,data.len()-1)+",\"grounded\":"+((NetProps.GetPropInt(player,"m_fFlags")&1)!=0?"true":"false")+",\"dead\":"+(player.IsDead()?"true":"false")+",\"incap\":"+(player.IsIncapacitated()?"true":"false")+"}";
+    data=data.slice(0,data.len()-1)+",\"flying\":"+("FlightActive" in this && FlightActive(player)?"true":"false")+"}";
+    return data;
+};
+L4D2MCBridge.anchor = SpawnEntityFromTable("info_target", { targetname = "l4d2mc_bridge" });
+L4D2MCBridge.anchor.ValidateScriptScope();
+L4D2MCBridge.anchor.GetScriptScope().BridgeThink <- function() {
+    if (Time() - L4D2MCBridge.collisionChangedAt > 3.0)L4D2MCBridge.ClearCollision();
+    L4D2MCBridge.frame++;
+    local b=L4D2MCBridge,host=b.CoopListenHost();
+    if(host!=null && host.IsValid() && host.IsSurvivor() && !IsPlayerABot(host)) {
+        local ctx=b.CoopContext(host,true);
+        b.CoopWith(ctx,function(){
+            if(!ReadGameplay(host))RestoreAppearance();
+            local pose=ActorPoseJson(host);
+            L4D2MCBridge.hostPose<-pose;L4D2MCBridge.hostPoseFrame<-L4D2MCBridge.frame;
+            StringToFile("l4d2mc_pose.txt",pose);
+        });
+    } else b.RestoreAppearance();
+    b.CoopTick(host);b.CoopExport(host);
+    if (Time() >= b.collisionAt) {
+        b.collisionAt = Time() + 0.25;
+        try { b.SyncCollision(); } catch (error) { printl("[L4D2MC COLLISION] " + error); }
     }
     return 0.033;
 };
 AddThinkToEnt(L4D2MCBridge.anchor, "BridgeThink");
-printl("[L4D2MC BRIDGE] exporting local survivor camera");
+printl("[L4D2MC BRIDGE] exporting explicit listen host and coop actors");

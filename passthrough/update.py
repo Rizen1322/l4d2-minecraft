@@ -9,13 +9,15 @@ def update(game=GAME):
     game=game_path(game)
     manifest=json.loads(RECEIPT.read_text(encoding='utf-8'))
     recover_pending(manifest)
-    files=[(ROOT/'passthrough/guest/build/libs/passthrough-0.1.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
+    files=[(ROOT/'passthrough/guest/build/libs/passthrough-0.2.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
            (ROOT/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
     files += [(ROOT/'passthrough/shaders'/name,game/'bin/l4d2mc/shaders'/name)
               for name in ('TeamHud.fxh','L4D2Minecraft.fx')]
     files += [(ROOT/'passthrough/host'/name,game/'left4dead2/scripts/vscripts'/name)
-              for name in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut')]
+              for name in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut','l4d2mc_coop.nut','l4d2mc_flight.nut')]
+    files += [(ROOT/'passthrough/host'/name,game/'left4dead2/cfg'/name)
+              for name in ('l4d2mc_use_press.cfg','l4d2mc_use_release.cfg')]
     pending=[]
     # Validate every payload/ownership before replacing any component.
     for source,target in files:
@@ -28,8 +30,14 @@ def update(game=GAME):
         try:install_file(source,target,manifest)
         except PermissionError:pending.append(str(target));continue
         if digest(source)!=digest(target):raise RuntimeError('Installed hash mismatch: '+str(target))
+    guest_jar=str(GUEST/'mods/l4d2mc-guest.jar')
+    if guest_jar in pending:
+        # The launcher runs while Minecraft is already open; its own JAR stays
+        # locked until Minecraft exits. Apply it on the next closed-Minecraft run.
+        pending.remove(guest_jar)
+        print('Minecraft is running: the guest mod update applies after Minecraft is closed and update.py runs again.')
     if pending:raise RuntimeError('Close games before applying locked components: '+', '.join(pending))
-    print('Nine mashup components verified; no games started.')
+    print(f'{len(files)} mashup components verified; no games started.')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--game',type=Path,default=GAME)

@@ -16,15 +16,25 @@ class GameplayMailbox:
     def __init__(self,path):
         self.path=path;self.generation=uuid.uuid4().hex[:12]
         self.epoch=0;self.serial=0;self.events=deque(maxlen=32);self.mobs=[];self.projectiles=[];self.physics=[]
+        self.reply_acks=deque(maxlen=64)
         self.map=None;self.changed=0;self.equipment=None;self.equipment_at=0;self.signals=[];self.signals_at=0;self.navigation={};self.protection=None;self.protection_at=0;self.effects=None;self.effects_at=0
         self.fires=[];self.fires_at=0
         self.totem_held=None;self.totem_at=0
         self.mobs_at=self.projectiles_at=self.physics_at=-math.inf
+        self.flight=None;self.flight_at=-math.inf;self.consuming=None;self.consume_at=-math.inf
 
     def apply(self,message):
         kind=message.get('t')
         event=None
-        if kind=='explosion':
+        if kind=='flight':
+            values=[message.get(k) for k in ('on','elytra','boosting')];boost=message.get('boost')
+            if any(type(v) is not bool for v in values) or type(boost) is not int or not 0<=boost<2**31:raise ValueError('Invalid Elytra state')
+            self.flight=(int(values[0]),int(values[1]),boost,int(values[2]));self.flight_at=time.monotonic()
+        elif kind=='consume':
+            value=message.get('using')
+            if type(value) is not bool:raise ValueError('Invalid consumable state')
+            self.consuming=value;self.consume_at=time.monotonic()
+        elif kind=='explosion':
             p=source_position(message['pos']);r=float(message['r'])
             if not math.isfinite(r) or not 0<r<=32:raise ValueError('invalid blast radius')
             event=('explosion',*p,r*32)
@@ -98,7 +108,9 @@ class GameplayMailbox:
         elif kind=='interact':event=('interact',)
         elif kind=='replyack':
             if type(message['id']) is not int or not 0<message['id']<2**31:raise ValueError('invalid ack')
-            event=('replyack',message['id'])
+            # Receipts are idempotent state, not discrete actions. A reply burst
+            # must never evict an attack before Source reads the next mailbox.
+            if message['id'] not in self.reply_acks:self.reply_acks.append(message['id'])
         elif kind=='mobhit':
             handle=message['h'];d=float(message['d']);p=source_position(message['from'])
             if type(handle) is not int or not 0<handle<2**31 or not math.isfinite(d) or not 0<=d<=100:raise ValueError('invalid mob hit')
@@ -111,16 +123,17 @@ class GameplayMailbox:
             source=message['m' if kind=='mobs' else 'p'];rows=[]
             if len(source)>256:raise ValueError('too many entities')
             for row in source[:64]:
-                if len(row) not in ((5,6) if kind=='proj' else (5,)) or type(row[0]) is not int or not 0<row[0]<2**31:raise ValueError('invalid entity')
+                if len(row) not in ((5,6,9) if kind=='proj' else (5,)) or type(row[0]) is not int or not 0<row[0]<2**31:raise ValueError('invalid entity')
                 name=row[1]
                 if not isinstance(name,str) or len(name)>48 or not all(c.isascii() and (c.isalnum() or c=='_') for c in name):raise ValueError('invalid kind')
                 position=source_position(row[2:5])
                 if kind=='proj':
                     damage=60.0 if name=='arrow' else 80.0
-                    if len(row)==6:
+                    if len(row) in (6,9):
                         if type(row[5]) not in (int,float) or not math.isfinite(row[5]) or not 0<=row[5]<=100:raise ValueError('invalid projectile damage')
                         damage=float(row[5])*15
-                    rows.append((row[0],name,*position,damage))
+                    origin=source_position(row[6:9]) if len(row)==9 else ()
+                    rows.append((row[0],name,*position,damage,*origin))
                 else:rows.append((row[0],name,*position))
             if kind=='mobs':self.mobs=rows;self.mobs_at=time.monotonic()
             else:self.projectiles=rows;self.projectiles_at=time.monotonic()
@@ -140,12 +153,18 @@ class GameplayMailbox:
     def publish(self,map_name,*,active=True,gui=False,sprint=False,attack=False,use=False):
         if not map_name or not all(c.isascii() and (c.isalnum() or c=='_') for c in map_name):raise ValueError('invalid map')
         if self.map is not None and self.map!=map_name:
+            self.reply_acks.clear()
             self.events.clear();self.mobs.clear();self.projectiles.clear();self.physics.clear();self.equipment=None;self.signals=[];self.navigation.clear();self.protection=None;self.effects=None
             self.fires=[];self.fires_at=0
             self.totem_held=None;self.totem_at=0
+            self.flight=None;self.consuming=None
         self.map=map_name
         records=[f'{self.generation} {map_name} {int(active)} {time.monotonic_ns()} {int(gui)} {int(sprint)} {int(attack and not gui)} {int(use and not gui)} {self.epoch}']
         if active:
+            if self.flight is not None and time.monotonic()-self.flight_at<.75 and not gui:
+                records.append(' '.join(map(str,('flight',*self.flight))))
+            if self.consuming is not None and time.monotonic()-self.consume_at<.75 and not gui:
+                records.append(f'consume {int(self.consuming)}')
             if time.monotonic()-self.mobs_at<0.75:
                 records+=[' '.join(map(str,('golem',*row))) for row in self.mobs if row[1] in ('iron_golem','snow_golem')][:8]
             records+=[' '.join(map(str,('nav',*row))) for row,at in self.navigation.values() if time.monotonic()-at<1.5]
@@ -168,6 +187,7 @@ class GameplayMailbox:
             # A corpse/spectator has no controls, but a previously requested
             # durable totem result and its reply acknowledgements must arrive.
             records+=[' '.join(map(str,('event',*e))) for e in self.events if e[1] in ('totemresult','replyack')]
+        records += [f'replyack {ident}' for ident in self.reply_acks]
         records.append(f'end {records[0].split()[3]} {len(records)-1}')
         text='\n'.join(records)
         if len(text)>32768:raise ValueError('mailbox too large')

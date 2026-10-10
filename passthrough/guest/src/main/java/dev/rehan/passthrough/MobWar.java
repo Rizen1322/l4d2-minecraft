@@ -86,10 +86,13 @@ public final class MobWar {
         if(!isProxy(target) || !target.isAlive() || target.isRemoved())return false;
         Integer handle=handleOf.get(target.getId());
         if(handle==null || !presence.targetable(handle,System.nanoTime()))return false;
+        if(SourcePursuitGoal.ignored(mob,target))return false;
         Integer faction=factionOf.get(target.getId());
         if(faction==null)return false;
         String kind=BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath();
         boolean protector=kind.equals("iron_golem") || kind.equals("snow_golem");
+        // Melee golems cannot reach infected on another floor (they would stare through it).
+        if(protector && Math.abs(target.getY()-mob.getY())>3.0)return false;
         return faction==(protector?1:0) && GolemOrders.permits(mob,target);
     }
 

@@ -117,6 +117,14 @@ inline void body(Sample& s) {
     for(int i=0;i<3;i++)if(!std::isfinite(pos[i]) || std::abs(pos[i])>32736 || !std::isfinite(angles[i]))return;
     s.bodyX=pos[0]/32.0;s.bodyY=pos[2]/32.0;s.bodyZ=-pos[1]/32.0;s.bodyYaw=-angles[1]-90;s.bodyValid=true;
 }
+// Independent aligned fields after the 120-byte camera/body packet.
+inline void publish_wheel(int32_t units) {
+    static HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,128,L"Local\\L4D2MinecraftRenderPose");
+    static uint8_t* data=map?static_cast<uint8_t*>(MapViewOfFile(map,FILE_MAP_WRITE,0,0,128)):nullptr;
+    if(!data)return;
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(data+120),static_cast<LONG>(units));
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(data+124),static_cast<LONG>(0x4d57484c));
+}
 inline void publish_visibility(bool ready) {
     static HANDLE map=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,128,L"Local\\L4D2MinecraftRenderPose");
     static uint8_t* data=map?static_cast<uint8_t*>(MapViewOfFile(map,FILE_MAP_WRITE,0,0,128)):nullptr;

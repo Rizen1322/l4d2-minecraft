@@ -7,6 +7,41 @@ from types import SimpleNamespace
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_unowned_mod_profile_is_preserved_before_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);mc=root/'mc';source=root/'profile.json';source.write_bytes(b'new mod profile')
+            target=mc/'versions/L4D2MC-Fabric-26.3/L4D2MC-Fabric-26.3.json'
+            target.parent.mkdir(parents=True);target.write_bytes(b'old custom profile')
+            world=mc/'saves/personal-world';world.mkdir(parents=True);(world/'data').write_bytes(b'personal')
+            manifest={}
+            with patch.object(install,'MINECRAFT',mc),patch.object(install,'RECEIPT',root/'receipt.json'):
+                install.install_guest_profile(source,target,manifest)
+            self.assertEqual(target.read_bytes(),source.read_bytes())
+            self.assertEqual([p.read_bytes() for p in target.parent.glob('*.l4d2mc-backup-*')],[b'old custom profile'])
+            self.assertEqual(manifest[str(target.absolute())],install.digest(source))
+            self.assertEqual((world/'data').read_bytes(),b'personal')
+
+    def test_profile_install_failure_restores_unowned_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);mc=root/'mc';source=root/'new';source.write_bytes(b'new')
+            target=mc/'versions/L4D2MC-Fabric-26.3/L4D2MC-Fabric-26.3.json'
+            target.parent.mkdir(parents=True);target.write_bytes(b'original')
+            with patch.object(install,'MINECRAFT',mc),patch.object(install,'install_file',side_effect=OSError('disk full')):
+                with self.assertRaises(OSError):install.install_guest_profile(source,target,{})
+            self.assertEqual(target.read_bytes(),b'original')
+            self.assertEqual(list(target.parent.glob('*.l4d2mc-backup-*')),[])
+
+    def test_changed_owned_profile_and_other_ids_are_not_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'new';source.write_bytes(b'new')
+            target=root/'versions/L4D2MC-Fabric-26.3/L4D2MC-Fabric-26.3.json'
+            target.parent.mkdir(parents=True);target.write_bytes(b'user change')
+            with patch.object(install,'MINECRAFT',root):
+                with self.assertRaises(RuntimeError):install.install_guest_profile(source,target,{str(target.absolute()):'old hash'})
+                with self.assertRaises(RuntimeError):install.install_guest_profile(source,root/'other.json',{})
+            self.assertEqual(target.read_bytes(),b'user change')
+            self.assertEqual(list(target.parent.glob('*.l4d2mc-backup-*')),[])
+
     def test_user_change_during_stage_is_preserved(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);source=root/'source';target=root/'owned';source.write_bytes(b'new');target.write_bytes(b'old')

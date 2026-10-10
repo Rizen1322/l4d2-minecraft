@@ -15,4 +15,5 @@ HUD portraits/layouts are privately extracted from installed L4D2 during builds.
 They are not licensed by this project's MIT license. Do not redistribute the
 locally compiled portrait-bearing guest JAR or private HUD VPK; source ZIP excludes
 them. Optional YouTube artwork used OpenAI image_gen, is an illustration rather
-than gameplay capture, and is excluded from the software release.
+  than gameplay capture. The explicitly labelled README illustration is included
+  in the source release; private game-derived portraits are excluded.

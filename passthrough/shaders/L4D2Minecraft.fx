@@ -8,6 +8,7 @@
 texture MCWorldTex : MCWORLD;
 texture MCDepthTex : MCDEPTH;
 texture MCOverlayTex : MCOVERLAY;
+// Guest RGBA bytes are uploaded unchanged into these BGRA textures; colour reads swap with .bgra.
 sampler sWorld { Texture = MCWorldTex; AddressU = CLAMP; AddressV = CLAMP; };
 sampler sDepth { Texture = MCDepthTex; MinFilter = POINT; MagFilter = POINT; AddressU = CLAMP; AddressV = CLAMP; };
 sampler sOverlay { Texture = MCOverlayTex; AddressU = CLAMP; AddressV = CLAMP; };
@@ -26,6 +27,8 @@ uniform float DepthBias < ui_type = "drag"; ui_min = 0.0; ui_max = 1.0; ui_step 
 	ui_tooltip = "How far behind L4D2's surface Minecraft may still show (blocks resting on the ground)."; > = 0.04;
 uniform float SlopeBias < ui_type = "drag"; ui_min = 0.0; ui_max = 40.0; ui_step = 0.1; ui_label = "Depth bias per grazing slope";
 	ui_tooltip = "Extra depth bias where L4D2's surface is seen at a grazing angle (its depth changes fast down the screen): Minecraft ground laid into L4D2's (lava, netherrack) still shows far away."; > = 0.0;
+uniform float MotionBias < ui_type = "drag"; ui_min = 0.0; ui_max = 2.0; ui_step = 0.05; ui_label = "Depth bias per metre of camera motion";
+	ui_tooltip = "Extra depth bias while Minecraft's frame lags a moving camera, so blocks do not sink into L4D2's floor."; > = 0.0;
 uniform float MaxBias < ui_type = "drag"; ui_min = 0.1; ui_max = 10.0; ui_step = 0.1; ui_label = "Largest depth bias (m)"; > = 3.0;
 uniform float HostDepthScale < ui_type = "drag"; ui_min = 0.001; ui_max = 2.0; ui_step = 0.001; ui_label = "L4D2 depth scale";
 	ui_tooltip = "Calibration: multiplies L4D2's linearised depth."; > = 0.03125;
@@ -67,6 +70,26 @@ uniform float3 WarpRow2 = float3(0.0, 0.0, 1.0);
 uniform float3 WarpTan = float3(0.7, 0.7, 1.7777);
 // Set by the add-on: L4D2's camera position relative to Minecraft's, in Minecraft's camera space.
 uniform float3 WarpT = float3(0.0, 0.0, 0.0);
+// Steve and other near guest surfaces move fastest during third-person orbit turns. A strict
+// back-projection test rejects their silhouettes and lets the L4D2 world show through them.
+uniform float NearTrackDepth < ui_type = "drag"; ui_min = 0.0; ui_max = 10.0; ui_step = 0.1; ui_label = "Near re-projection depth (m)"; > = 0.0;
+uniform float NearTrackPixels < ui_type = "drag"; ui_min = 1.5; ui_max = 16.0; ui_step = 0.5; ui_label = "Near re-projection tolerance (px)"; > = 4.0;
+float track_tolerance(float depth) { return depth < NearTrackDepth ? NearTrackPixels : 1.5; }
+// Set by the add-on: Steve's feet in Minecraft's camera space (w = 1 while he is drawn in third
+// person) and the world's up direction there. Steve moves together with the third-person
+// camera, so re-projecting his pixels by the camera translation tears him apart.
+uniform float4 SteveCam = float4(0.0, 0.0, 0.0, 0.0);
+uniform float3 SteveUp = float3(0.0, 1.0, 0.0);
+uniform float SteveRadius < ui_type = "drag"; ui_min = 0.3; ui_max = 2.0; ui_step = 0.05; ui_label = "Steve volume radius (m)"; > = 0.95;
+bool steve_at(float2 mcUv, float depth)
+{
+    if (SteveCam.w < 0.5 || depth > 1e8) return false;
+    const float3 q = float3((mcUv * 2.0 - 1.0) * float2(WarpTan.y * WarpTan.z, WarpTan.y), -1.0) * depth;
+    const float3 r = q - SteveCam.xyz;
+    const float h = dot(r, SteveUp);
+    const float3 across = r - h * SteveUp;
+    return h > -0.2 && h < 2.2 && dot(across, across) < SteveRadius * SteveRadius;
+}
 
 // L4D2's picture at quarter size with mips: its blurred levels stand in for the light around each pixel.
 texture GtaLightTex { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA8; MipLevels = 7; };
@@ -163,7 +186,7 @@ bool track_surface(float3 rotatedRay, float seed, float2 uv,
     if(hp.z>=-0.01) return false;
     float2 ndc=hp.xy/-hp.z/float2(WarpTan.x*BUFFER_WIDTH*BUFFER_RCP_HEIGHT,WarpTan.x);
     float2 error=(ndc-float2(uv.x*2-1,1-uv.y*2))*float2(BUFFER_WIDTH,BUFFER_HEIGHT)*.5;
-    if(any(abs(error)>1.5)) return false;
+    if(any(abs(error)>track_tolerance(depth))) return false;
     hostDepth=-hp.z;
     return true;
 }
@@ -179,7 +202,7 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 
     if (!HostOcclusion) {
         // True raw-color diagnostic: independent of BOTH depth buffers.
-        float4 raw=tex2D(sWorld,ouv);
+        float4 raw=tex2D(sWorld,ouv).bgra;
         outColor=float4(raw.rgb+host*(1-raw.a),1);
         outInfo=float4(raw.a,1,400,0);
         return;
@@ -190,14 +213,23 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 	bool inside = true;
 	const float zh = HostOcclusion ? host_linear(tex2Dlod(ReShade::DepthBuffer, float4(uv, 0, 0)).x) : 400.0;
 	// how far behind L4D2's surface Minecraft may still show: more where that surface is seen at a grazing angle
-	const float allow = min(DepthBias + SlopeBias * abs(ddy(zh)), max(MaxBias, DepthBias));
+	// Re-projection depth error grows with how far the camera moved since Minecraft rendered.
+	const float allow = min(DepthBias + SlopeBias * abs(ddy(zh)) + MotionBias * length(WarpT), max(MaxBias, DepthBias));
 	float zm = 1e9;
     const bool doWarp = Reproject && HostOcclusion; // Diagnostic bypass uses the untouched guest image.
     const float3 hostRay=float3((uv.x*2-1)*WarpTan.x*BUFFER_WIDTH*BUFFER_RCP_HEIGHT,(1-uv.y*2)*WarpTan.x,-1);
     const float3 rotatedRay=float3(dot(WarpRow0,hostRay),dot(WarpRow1,hostRay),dot(WarpRow2,hostRay));
+    // Steve keeps his place on screen relative to the third-person camera: take his pixels
+    // exactly where Minecraft drew them, without the camera translation.
+    bool steveHit=false;
+    if (doWarp && SteveCam.w>0.5) {
+        const float sd=mc_linear(tex2Dlod(sDepth,float4(ouv,0,0)).r);
+        if (tex2Dlod(sWorld,float4(ouv,0,0)).a>0.005 && steve_at(ouv,sd)) {muv=ouv;zm=sd;inside=true;steveHit=true;}
+    }
     // Same eye position: rotation has an exact inverse projection. Ray marching
     // can miss a whole surface and is unnecessary in this common case.
-    if (doWarp && dot(WarpT,WarpT)<0.000001) {
+    if (steveHit) {}
+    else if (doWarp && dot(WarpT,WarpT)<0.000001) {
         float2 ndc=rotatedRay.xy/max(-rotatedRay.z,0.000001)/float2(WarpTan.y*WarpTan.z,WarpTan.y);
         muv=ndc*.5+.5;
         inside=rotatedRay.z<0 && all(abs(ndc)<=1);
@@ -272,7 +304,7 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
             if (depth>1e8 || hostPoint.z>=-0.01 || tex2Dlod(sWorld,float4(candidate,0,0)).a<0.005) continue;
             float2 hostNdc=hostPoint.xy / -hostPoint.z / float2(WarpTan.x * BUFFER_WIDTH * BUFFER_RCP_HEIGHT,WarpTan.x);
             float2 errorPixels=(hostNdc-float2(uv.x*2-1,1-uv.y*2))*float2(BUFFER_WIDTH,BUFFER_HEIGHT)*0.5;
-            if (any(abs(errorPixels)>1.5)) continue;
+            if (any(abs(errorPixels)>track_tolerance(depth))) continue;
             muv=candidate;
             zm=-hostPoint.z;
             inside=true;
@@ -280,7 +312,10 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 		}
         if(!inside && tracked) {muv=trackedUv;zm=trackedDepth;inside=true;}
 	}
-	const float4 world = inside ? tex2D(sWorld, muv) : 0.0;
+    // A translated sample of Steve here is a stale copy (he is no longer at this pixel).
+    if (inside && !steveHit && SteveCam.w>0.5 && steve_at(muv,mc_linear(tex2Dlod(sDepth,float4(muv,0,0)).r)))
+        inside=false;
+	const float4 world = inside ? tex2D(sWorld, muv).bgra : 0.0;
 	if (!doWarp)
 		zm = mc_linear(tex2D(sDepth, muv).r);
 
@@ -391,7 +426,7 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 		const float3 purple = color * float3(0.72, 0.38, 1.25) + float3(0.12, 0.0, 0.22) * (0.6 + 0.4 * sin(t * 3.0 + r * 9.0));
 		color = lerp(color, purple, saturate(PortalWarp * (0.55 + r * 0.6)));
 	}
-	const float4 overlay = tex2D(sOverlay, float2(uv.x, 1.0 - uv.y)); // hand and HUD are screen-space: never shaken
+	const float4 overlay = tex2D(sOverlay, float2(uv.x, 1.0 - uv.y)).bgra; // hand and HUD are screen-space: never shaken
 	// Guest GUI now draws teammate cards with true alpha above its shield/hand.
 	return overlay.rgb + saturate(color) * (1.0 - overlay.a);
 }

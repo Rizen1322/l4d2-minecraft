@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.2.0-alpha.1 — co-op transport and remote combat (2026-10-11)
+
+- Keep block edits through congestion and reconnect; session IDs deduplicate
+  accepted events so old edits cannot overwrite newer room state.
+- Acknowledge room commands after Minecraft server dispatch, with bounded
+  delivery windows, retries and protection against stale/out-of-order receipts.
+- Separate network membership leases from the frozen-Source watchdog; compensate
+  tick pacing for round-trip time and retry malformed/stale room responses.
+- Route melee against remote Minecraft mobs to their owning guest server with
+  scene, distance, ownership and duplicate-damage checks.
+- Drain guest event bursts in batches. Coalesced Source reply acknowledgements
+  no longer evict attacks from the gameplay event queue.
+- Retain projectile launch origins and trace the first flight segment immediately.
+  Synchronize aim before item use and remove front-camera physical pitch reversal.
+- Repair portable setup: preserve Zig standard-library directories, use a
+  verified 32-bit Squirrel checker, capture process exit codes, preserve existing
+  Minecraft profiles, and fix PowerShell launcher argument quoting.
+- Add `Coop.bat`, `Update-Coop.cmd`, connection/roster diagnostics, deployment
+  documentation and a source-only release containing the co-op entry points.
+
+The previous LAN/Elytra work below is included in this release. Offline
+verification does not establish complete two-PC gameplay correctness.
+
+## Unreleased — experimental LAN and Elytra (2026-10-10)
+
+- Per-survivor Source gameplay/survival/navigation contexts and validated
+  authenticated LAN mailboxes; room name pairing resolves changed Source userids.
+- Shared bounded block-state edits, deletion history and reconnect snapshots;
+  client-only Steve/mob/TNT/projectile visuals. No shared container NBT.
+- Equipped Elytra flight/rocket physics changes native Source velocity, keeps
+  collisions and restores gravity after ground/menu/pins/lease expiration.
+- Shift visually crouches Steve; actual eating/drinking temporarily slows native
+  movement, preserving original speed and potion multipliers on restoration.
+- Hide owned attached weapon world models in third person; restore visibility
+  when dropped. Native wheel works for joiners, with menu/focus ownership guards.
+- Extend loopback, guest policy, native window and real Source-handler tests.
+
+The room is intended for a private LAN. A complete two-PC test is pending.
+
 ## Unreleased — alpha source preparation (2026-10-09)
 
 - Additional agent audit: correct current temporary-HP decay during healing and

@@ -45,9 +45,28 @@ public final class HostState {
 	private static final long TIMEOUT_NANOS = 2_000_000_000L;
 	private static volatile Pose latest;
     private static volatile boolean usable,crouching,carrying,burning;
+    private static volatile boolean grounded;
+    public static boolean grounded(){return live()!=null && grounded;}
+    private static volatile dev.rehan.passthrough.PeerRoster peerRoster;
+    public static dev.rehan.passthrough.PeerRoster peerRoster(){return peerRoster;}
+    public static void peers(JsonObject message){
+        if(!message.has("players") || !message.get("players").isJsonArray() || !message.has("scene"))return;
+        var members=new java.util.ArrayList<dev.rehan.passthrough.PeerRoster.Member>();
+        for(var value:message.getAsJsonArray("players")){
+            if(members.size()>=4)break;
+            try{var row=value.getAsJsonObject();members.add(new dev.rehan.passthrough.PeerRoster.Member(
+                row.get("id").getAsInt(),row.get("x").getAsDouble(),row.get("y").getAsDouble(),row.get("z").getAsDouble(),
+                row.get("yaw").getAsFloat(),row.get("pitch").getAsFloat(),row.get("hp").getAsFloat(),row.get("incap").getAsBoolean(),row.get("dead").getAsBoolean(),
+                row.get("pin").getAsString(),row.get("main").getAsString(),row.get("off").getAsString(),row.get("flying").getAsBoolean(),row.has("crouching") && row.get("crouching").getAsBoolean()));}catch(RuntimeException ignored){}
+        }
+        peerRoster=new dev.rehan.passthrough.PeerRoster(message.get("scene").getAsLong(),System.nanoTime(),members);
+    }
     public static boolean carrying(){return live()!=null && carrying;}
     public static boolean burning(){return live()!=null && burning;}
     public static boolean isCrouching(){return live()!=null && crouching;}
+    private static volatile boolean frontView;
+    /** The host camera faces the player (second F5 view). */
+    public static boolean frontView(){return live()!=null && frontView;}
     public static boolean canUse(){return live()!=null && usable;}
 	/** The pose this frame renders with, taken once per frame so every hook agrees. Render thread only. */
 	private static Pose frame;
@@ -59,6 +78,7 @@ public final class HostState {
 
 	/** {"t":"cam","f":frame,"p":[x,y,z],"r":[yaw,pitch,roll],"fov":deg,"fp":bool,"pl":[x,y,z],"h":bodyYaw} */
 	static void update(final JsonObject m) {
+        grounded=m.has("grounded") && m.get("grounded").getAsBoolean();
         var team=new java.util.ArrayList<dev.rehan.passthrough.TeamHudPolicy.Member>();
         if(m.has("teamhud") && m.get("teamhud").isJsonArray())for(var row:m.getAsJsonArray("teamhud")){
             if(team.size()>=3)break;
@@ -76,6 +96,7 @@ public final class HostState {
 		carrying=m.has("carrying") && m.get("carrying").getAsBoolean();
         usable=m.has("usable") && m.get("usable").getAsBoolean();
         crouching=m.has("sneak") && m.get("sneak").getAsBoolean();
+        frontView=m.has("front") && m.get("front").getAsBoolean();
 		JsonArray p = m.getAsJsonArray("p");
 		JsonArray r = m.getAsJsonArray("r");
 		JsonArray pl = m.has("pl") ? m.getAsJsonArray("pl") : p;
@@ -100,6 +121,12 @@ public final class HostState {
 	}
 
 	/** The latest pose if the host is still sending, else null. */
+	/** No pose has arrived for half a second: the link itself is down (not merely a hidden/cutscene pose). */
+	static boolean linkLost() {
+		Pose p = latest;
+		return p == null || System.nanoTime() - p.receivedNanos() > 500_000_000L;
+	}
+
 	static Pose live() {
 		Pose p = latest;
 		return dev.rehan.passthrough.MapBuilds.ready && visible && p != null && p.scene()==dev.rehan.passthrough.MapBuilds.scene() && System.nanoTime() - p.receivedNanos() < TIMEOUT_NANOS ? p : null;

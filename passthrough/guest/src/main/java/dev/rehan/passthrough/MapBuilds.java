@@ -33,6 +33,17 @@ public final class MapBuilds {
     private static long requestedScene;
     private static volatile long scene;
     public static long scene(){return scene;}
+    /** Initial LAN transfer has positive build states only; live deletions use AIR deltas. */
+    public static Map<BlockPos,Integer> networkSnapshot(){
+        var result=new LinkedHashMap<BlockPos,Integer>();
+        if(server==null || !ready)return result;
+        for(var entry:cells.entrySet()) {
+            var p=entry.getKey();var state=entry.getValue().state();int id=Block.getId(state);
+            if(state.isAir() || state.is(Blocks.BARRIER) || Nether.isGround(p) || id<0 || id>65535)continue;
+            if(result.size()>=20000)break;result.put(p,id);
+        }
+        return result;
+    }
     private static long epoch=-1;
     private static String map="",pending="";
     private static boolean applying;
