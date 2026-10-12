@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0-alpha.1 — desktop companion and combat audio (2026-10-12)
+
+- Add a small Windows desktop EXE with game autodetection, verified source
+  downloads, private tool preparation, installation, co-op invitations and launch.
+- Preserve host room tokens across invitation copies; joining uses the player's
+  own L4D2 nickname. Keep invitation secrets out of process arguments and logs.
+- Validate archive paths and release manifests before copying source files.
+- Play vanilla Minecraft weak/strong/sweep sounds for confirmed Source hits,
+  with a sword swing sound and retry deduplication. Ignore dead combat targets.
+- Exercise the embedded Python setup, tool downloads and clean source build.
+  Actual game audio and a full two-PC GUI install still need user verification.
+
+
 ## 0.2.0-alpha.1 — co-op transport and remote combat (2026-10-11)
 
 - Keep block edits through congestion and reconnect; session IDs deduplicate

@@ -417,11 +417,15 @@ L4D2MCBridge.Event <- function(fields,player) {
                 targets.append(e);
             }
         }
+        local hits=0;
         foreach(e in targets) {
             if(e==player || (e.GetClassname()=="player" && e.IsSurvivor()))continue;
+            if(!ActorAlive(e))continue;
             local hit=tier>0 && e.GetClassname()=="infected"?e.GetHealth()+1.0:damage;
             e.TakeDamage(hit,128,player);
+            hits++;
         }
+        if(hits>0 && "Reply" in this)Reply(format("\"t\":\"attacksound\",\"kind\":\"%s\"",blade && hits>1?"sweep":damage>=60?"strong":"weak"));
     } else if(kind=="mobhit" && (fields.len()==9 || fields.len()==10)) {
         local id=Integer(fields[3]),damage=Number(fields[4],500);
         local from=Vector(Number(fields[5]),Number(fields[6]),Number(fields[7]));

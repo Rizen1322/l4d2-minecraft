@@ -31,3 +31,5 @@ l4d2mc.coop.json.tmp
 .env.*
 output/
 release/
+companion/**/bin/
+companion/**/obj/

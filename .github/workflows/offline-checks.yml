@@ -16,5 +16,8 @@ jobs:
       - run: python -m unittest discover -s passthrough -p 'test_*.py'
       - run: python tools/release_source.py --check
       - run: python tools/release_source.py
+      - run: dotnet build companion/L4D2MC.Companion.csproj -c Release
+      - run: dotnet build companion/tests/Companion.Tests.csproj -c Release
+      - run: ./companion/tests/bin/Release/net48/Companion.Tests.exe
 # Full native/Fabric/Source build needs the user's own game and private resources.
 # CI deliberately does not upload a game-derived JAR or HUD VPK.

@@ -12,6 +12,10 @@ class ReleaseTests(unittest.TestCase):
         for name in ['docs/passthrough/private.json','docs/tools/token.json','docs/Launch-Minecraft.ps1','docs/assets/random-game-portrait.png','l4d2mc.coop.json','l4d2mc.coop.json.tmp']:
             self.assertFalse(release.permitted(name),name)
     def test_private_game_assets_and_profile_never_ship(self):
+        self.assertTrue(release.permitted('companion/MainWindow.xaml'))
+        self.assertTrue(release.permitted('companion/Services/Core.cs'))
+        self.assertFalse(release.permitted('companion/bin/Release/net48/L4D2MC-Companion.exe'))
+        self.assertFalse(release.permitted('companion/obj/project.assets.json'))
         for p in ['passthrough/guest-game/saves/world/level.dat','dist/l4d2mc_hud_assets/assets/a.png','l4d2mc.local.json','.env','passthrough/guest/build/libs/mod.jar','research/token.txt']:
             self.assertFalse(release.permitted(p),p)
         self.assertTrue(release.permitted('passthrough/guest/gradle/wrapper/gradle-wrapper.jar'))

@@ -115,6 +115,7 @@ final class ClientInput {
                     double strength=player.getAttackStrengthScale(0.5F);
                     double damage=player.getAttributeValue(Attributes.ATTACK_DAMAGE)*(0.2+strength*strength*0.8);
                     PeerEntities.attack(hit.getEntity(),damage);
+                    CombatAudio.play(strength>=0.9F?"strong":"weak");
                     player.swingAndResetAttackStrength(net.minecraft.world.InteractionHand.MAIN_HAND,
                         net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
                     return;
@@ -125,6 +126,7 @@ final class ClientInput {
                     double damage=player.getAttributeValue(Attributes.ATTACK_DAMAGE)*(0.2+strength*strength*0.8);
                     Passthrough.events.accept(String.format(Locale.ROOT,"{\"t\":\"melee\",\"d\":%.3f,\"r\":3.0,\"cut\":%b,\"tier\":%d}",damage,player.getMainHandItem().is(net.minecraft.tags.ItemTags.SWORDS),player.getMainHandItem().is(net.minecraft.world.item.Items.NETHERITE_SWORD)?2:player.getMainHandItem().is(net.minecraft.world.item.Items.DIAMOND_SWORD)?1:0));
                     player.resetAttackStrengthTicker();
+                    if(player.getMainHandItem().is(net.minecraft.tags.ItemTags.SWORDS))CombatAudio.play("miss");
 				}
                 if(k.equals("use") && down && player!=null && minecraft.gui.screen()==null && HostState.carrying()) {
                     Passthrough.events.accept("{\"t\":\"interact\"}");return;
@@ -172,7 +174,8 @@ final class ClientInput {
 					inventory.setSelectedSlot(Math.floorMod(inventory.getSelectedSlot() - m.get("d").getAsInt(), size));
 				}
 			}
-			case "hud" -> {
+            case "attacksound" -> CombatAudio.play(m.get("kind").getAsString());
+            case "hud" -> {
 				if (minecraft.gui.hud.isHidden() != m.get("hidden").getAsBoolean()) {
 					minecraft.gui.hud.toggle();
 				}

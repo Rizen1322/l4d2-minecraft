@@ -25,6 +25,7 @@ function GetListenServerHost(){return host;}
 ::L4D2MCPreviousGameplay<-null;::L4D2MCBridge<-{};
 dofile("passthrough/host/l4d2mc_gameplay.nut");
 local b=L4D2MCBridge;
+local sounds=[];b.Reply<-function(value){sounds.append(value);};
 b.survival<-{player=host};b.navigation<-{jobs={},index=0};
 b.Integer<-function(s){return s.tointeger();};b.Number<-function(s,limit=99999){return s.tofloat();};
 b.NativeUse=function(pressed){};
@@ -37,6 +38,10 @@ if(hostTarget.hits.len()!=1 || hostTarget.hits[0][1]!=host || peerTarget.hits.le
     throw "Peer melee used host aim or wrong damage attacker";
 b.CoopWith(remote,function(){Event(["event","1","melee","30","96"],peer);});
 if(peerTarget.hits.len()!=1)throw "Reliable peer melee retry applied damage twice";
+if(sounds.len()!=2 || sounds[0].find("attacksound")==null || sounds[1].find("weak")==null)throw "Confirmed hit sound missing or duplicated by retry";
+peerTarget.health=0;
+b.CoopWith(remote,function(){Event(["event","2","melee","30","96"],peer);});
+if(sounds.len()!=2)throw "Corpse attack played a successful hit sound";
 local localId=0,remoteId=0;
 b.CoopWith(own,function(){localId=Actor(hostTarget);});
 b.CoopWith(remote,function(){remoteId=Actor(peerTarget);});
@@ -55,6 +60,6 @@ own.gameplay.replies[7]<-"host";remote.gameplay.replies[7]<-"peer";
 remote.gameplay.generation="live";remote.gameplay.content="old";remote.gameplay.armed=true;
 remote.survival.fireZones<-{};
 b.CoopWith(remote,function(){if(!ReadGameplay(peer))throw "Receipt mailbox rejected";});
-if(7 in remote.gameplay.replies || !(7 in own.gameplay.replies) || remote.gameplay.lastEvent!=1)
+if(7 in remote.gameplay.replies || !(7 in own.gameplay.replies) || remote.gameplay.lastEvent!=2)
     throw "Receipt snapshot crossed actors or consumed a combat sequence";
 print("Source peer combat actor, aim and replay regressions passed\n");

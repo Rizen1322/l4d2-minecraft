@@ -102,7 +102,7 @@ public final class HostLink extends WebSocketServer {
 
     private static final java.util.Set<String> SOURCE_TASKS=java.util.Set.of(
         "hosthealth","peds","physground","projhit","equipmenthit","shieldcooldown","breakblock",
-        "mobdmg","mobpos","navpath","supply","blocksync","totemrequest","totemapplied","coopblocks","coopbootstrap","glide","peerattack");
+        "mobdmg","mobpos","navpath","supply","blocksync","totemrequest","totemapplied","coopblocks","coopbootstrap","glide","peerattack","attacksound");
     private final dev.rehan.passthrough.ReplyTracker replies=new dev.rehan.passthrough.ReplyTracker();
     private record SnapshotKey(long scene,long generation,String type) {}
     private final dev.rehan.passthrough.LatestTaskQueue<SnapshotKey> latestSnapshots=new dev.rehan.passthrough.LatestTaskQueue<>();
