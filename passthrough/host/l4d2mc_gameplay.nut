@@ -48,6 +48,22 @@ L4D2MCBridge.Hide <- function(e) {
 };
 // Client-side attachments (held melee, holstered sidearms) ignore their weapon
 // entity's flags but are drawn with the survivor; make the survivor transparent too.
+// True when every other human survivor's eyes are blocked from this player's body
+// and head by map geometry or props (a player with no human teammate is hidden).
+L4D2MCBridge.HiddenFromTeammates <- function(player,aura) {
+    if(!("Entities" in getroottable()) || !("TraceLine" in getroottable()))return true;
+    local viewer=null,center=player.GetOrigin()+Vector(0,0,36),head=player.GetOrigin()+Vector(0,0,64);
+    while((viewer=Entities.FindByClassname(viewer,"player"))!=null) {
+        if(viewer==player || !viewer.IsSurvivor() || IsPlayerABot(viewer) || viewer.IsDead())continue;
+        local eye=viewer.EyePosition();
+        foreach(point in [center,head]) {
+            local t={start=eye,end=point,ignore=viewer,mask=33570827}; // MASK_SOLID
+            TraceLine(t);
+            if(!("hit" in t) || !t.hit || ("enthit" in t && (t.enthit==player || t.enthit==aura)))return false;
+        }
+    }
+    return true;
+};
 L4D2MCBridge.HideSurvivor <- function(player) {
     Hide(player);
     if(!NetProps.HasProp(player,"m_nRenderMode") || !NetProps.HasProp(player,"m_clrRender"))return;
@@ -71,7 +87,9 @@ L4D2MCBridge.HideSurvivor <- function(player) {
                 NetProps.SetPropInt(player,"m_bSurvivorGlowEnabled",0);
             }
             saved.aura.SetOrigin(player.GetOrigin());saved.aura.SetAngles(player.GetAngles());
-            NetProps.SetPropInt(saved.aura,"m_Glow.m_iGlowType",saved.glowType>0?saved.glowType:3);
+            // Native teammate outlines show only while occluded; a prop's constant glow
+            // (type 3) also draws in plain view. Light it only when no other human sees him.
+            NetProps.SetPropInt(saved.aura,"m_Glow.m_iGlowType",HiddenFromTeammates(player,saved.aura)?(saved.glowType>0?saved.glowType:3):0);
             foreach(prop in ["m_Glow.m_glowColorOverride","m_Glow.m_bFlashing"])
                 if(NetProps.HasProp(player,prop) && NetProps.HasProp(saved.aura,prop))NetProps.SetPropInt(saved.aura,prop,NetProps.GetPropInt(player,prop));
             if(NetProps.HasProp(saved.aura,"m_Glow.m_nGlowRangeMin"))NetProps.SetPropInt(saved.aura,"m_Glow.m_nGlowRangeMin",96);

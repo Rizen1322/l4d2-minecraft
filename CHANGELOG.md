@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.7-alpha.1 — teammate outline only when hidden (2026-10-12)
+
+- The Steve-shaped teammate outline used a prop's constant glow, which also draws
+  in plain view. It now lights only while no other human survivor can see the
+  teammate's body or head (MASK_SOLID traces each tick), like L4D2's own outlines.
+
 ## 2.0.6-alpha.1 — mob damage, corpses, AFK, guest JAR (2026-10-12)
 
 - Minecraft mobs could not damage survivors: Source ignores `TakeDamageEx` with a
