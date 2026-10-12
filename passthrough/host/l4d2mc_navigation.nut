@@ -48,7 +48,7 @@ L4D2MCBridge.NavRequest <- function(f,player) {
         if(job.done && !job.answered)NavAnswer(id,job,[],false);
         return;
     }
-    if(!(id in navigation.jobs) && navigation.jobs.len()>=12)return;
+    if(!(id in navigation.jobs) && navigation.jobs.len()>=24)return;
     local job={q=q,heard=Time(),from=p,goal=goal,width=width,height=height,done=false,queue=[],head=0,
         parent={},area={},portal={},start=-1,target=-1,current=null,dir=0,adj=0,started=Time(),answer=null,answered=false};
     navigation.jobs[id]<-job;

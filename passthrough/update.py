@@ -9,7 +9,7 @@ def update(game=GAME):
     game=game_path(game)
     manifest=json.loads(RECEIPT.read_text(encoding='utf-8'))
     recover_pending(manifest)
-    files=[(ROOT/'passthrough/guest/build/libs/passthrough-0.2.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
+    files=[(ROOT/'passthrough/guest/build/libs/passthrough-2.0.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
            (ROOT/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
     files += [(ROOT/'passthrough/shaders'/name,game/'bin/l4d2mc/shaders'/name)
@@ -18,6 +18,8 @@ def update(game=GAME):
               for name in ('l4d2mc_bridge.nut','l4d2mc_gameplay.nut','l4d2mc_survival.nut','l4d2mc_navigation.nut','l4d2mc_coop.nut','l4d2mc_flight.nut')]
     files += [(ROOT/'passthrough/host'/name,game/'left4dead2/cfg'/name)
               for name in ('l4d2mc_use_press.cfg','l4d2mc_use_release.cfg')]
+    files += [(ROOT/'addon/models/l4d2mc'/('steve_aura.'+ext),game/'left4dead2/models/l4d2mc'/('steve_aura.'+ext)) for ext in ('mdl','vvd','dx90.vtx')]
+    files += [(ROOT/'addon/materials/l4d2mc'/('aura.'+ext),game/'left4dead2/materials/l4d2mc'/('aura.'+ext)) for ext in ('vmt','vtf')]
     pending=[]
     # Validate every payload/ownership before replacing any component.
     for source,target in files:

@@ -27,6 +27,7 @@ foreach(staleClass in ["prop_dynamic","prop_dynamic_override"]) {
 }
 foreach(prop in staleMobProps)if(prop.IsValid())prop.Kill();
 PrecacheModel("models/l4d2mc/cube.mdl");
+PrecacheModel("models/l4d2mc/steve_aura.mdl");
 ::L4D2MCBridge <- { frame = 0, epoch=RandomInt(1,2000000000), anchor = null, blocks = {}, collisionSequence = "", collisionAt = 0, collisionChangedAt = -100 };
 IncludeScript("l4d2mc_flight");
 IncludeScript("l4d2mc_coop");

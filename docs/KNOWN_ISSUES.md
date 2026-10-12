@@ -14,6 +14,12 @@
   surfaces, vehicle edges, slopes and irregular/custom maps.
 - Native maps are not destructible voxel worlds. Golems use Source route queries
   with guest collision proxies; not every obstacle/item/entity is fully supported.
+- V2 adds generic ground-mob routing and infected targeting. Flying/water
+  navigation, boss abilities and special-infected pin animations against guest
+  mobs remain incomplete. Native targets are capped at 16 per survivor context.
+- Steve glow uses an upright six-box outline, without armor/pose animation.
+  Render interpolation cannot remove latency; a wider capture cannot reveal
+  previously hidden faces.
 - Totem requires active native scene/safe floor. Full-team wipe/Director restart
   may interrupt transaction. Standard co-op armour uses post-damage nonlethal
   refund where pre-damage hook is absent; it cannot prevent every lethal hit.

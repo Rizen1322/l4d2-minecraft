@@ -166,7 +166,7 @@ class GameplayMailbox:
             if self.consuming is not None and time.monotonic()-self.consume_at<.75 and not gui:
                 records.append(f'consume {int(self.consuming)}')
             if time.monotonic()-self.mobs_at<0.75:
-                records+=[' '.join(map(str,('golem',*row))) for row in self.mobs if row[1] in ('iron_golem','snow_golem')][:8]
+                records+=[' '.join(map(str,('golem',*row))) for row in self.mobs][:16]
             records+=[' '.join(map(str,('nav',*row))) for row,at in self.navigation.values() if time.monotonic()-at<1.5]
             if time.monotonic()-self.signals_at<0.75:
                 records+=[' '.join(map(str,('signal',*e))) for e in self.signals]

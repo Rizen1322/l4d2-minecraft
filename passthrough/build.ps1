@@ -58,6 +58,8 @@ Write-Host ('Squirrel preflight: '+$Squirrel+'; '+$probe.Text.Trim())
 $cubeComplete=$true
 foreach ($extension in @('mdl','phy','vvd','dx90.vtx')) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot ('addon/models/l4d2mc/cube.'+$extension)))) { $cubeComplete=$false } }
 foreach ($material in @('dirt','stone','wood')) { foreach ($extension in @('vmt','vtf')) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot ('addon/materials/l4d2mc/'+$material+'.'+$extension)))) { $cubeComplete=$false } } }
+foreach ($extension in @('mdl','vvd','dx90.vtx')) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot ('addon/models/l4d2mc/steve_aura.'+$extension)))) { $cubeComplete=$false } }
+foreach ($extension in @('vmt','vtf')) { if (!(Test-Path -LiteralPath (Join-Path $projectRoot ('addon/materials/l4d2mc/aura.'+$extension)))) { $cubeComplete=$false } }
 if (!$cubeComplete) {
     python tools/build_assets.py --game $Game
     if ($LASTEXITCODE -ne 0) { throw 'Own collision model build failed.' }

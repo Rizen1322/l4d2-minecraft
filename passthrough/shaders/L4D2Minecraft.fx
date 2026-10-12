@@ -223,8 +223,11 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
     // exactly where Minecraft drew them, without the camera translation.
     bool steveHit=false;
     if (doWarp && SteveCam.w>0.5) {
-        const float sd=mc_linear(tex2Dlod(sDepth,float4(ouv,0,0)).r);
-        if (tex2Dlod(sWorld,float4(ouv,0,0)).a>0.005 && steve_at(ouv,sd)) {muv=ouv;zm=sd;inside=true;steveHit=true;}
+        // Guest world includes an extra border; crop it back to Source's FOV
+        // for the camera-relative local avatar, while retaining HUD coordinates.
+        const float2 steveUv=(ouv-.5)*(WarpTan.x/WarpTan.y)+.5;
+        const float sd=mc_linear(tex2Dlod(sDepth,float4(steveUv,0,0)).r);
+        if (tex2Dlod(sWorld,float4(steveUv,0,0)).a>0.005 && steve_at(steveUv,sd)) {muv=steveUv;zm=sd;inside=true;steveHit=true;}
     }
     // Same eye position: rotation has an exact inverse projection. Ray marching
     // can miss a whole surface and is unnecessary in this common case.

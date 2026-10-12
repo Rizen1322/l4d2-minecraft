@@ -21,6 +21,7 @@ final class SourcePursuitGoal extends Goal {
     private int attackCooldown,avoidTicks,stallTicks;
     private double side=1,bestDistance=Double.MAX_VALUE;
     private int trackedTarget=-1;
+    private Vec3 previousPosition;
     static boolean ignored(Mob mob,net.minecraft.world.entity.LivingEntity target){
         Long until=IGNORED.get(((long)mob.getId()<<32)|(target.getId()&0xffffffffL));
         if(until==null)return false;
@@ -30,7 +31,9 @@ final class SourcePursuitGoal extends Goal {
     /** A target the mob cannot get closer to (wall, other floor, no Source route) must not pin it forever. */
     private boolean stalled(net.minecraft.world.entity.LivingEntity target,double distance,boolean attacking){
         if(target.getId()!=trackedTarget){trackedTarget=target.getId();bestDistance=distance;stallTicks=0;return false;}
-        if(attacking || distance<bestDistance-.25){bestDistance=Math.min(bestDistance,distance);stallTicks=0;return false;}
+        boolean moved=previousPosition!=null && mob.position().distanceToSqr(previousPosition)>.0004;previousPosition=mob.position();
+        // A valid route may initially move away from an enemy to use stairs.
+        if(attacking || moved || distance<bestDistance-.25 || HostNavigation.waitingForRoute(mob)){bestDistance=Math.min(bestDistance,distance);stallTicks=0;return false;}
         if(++stallTicks<STALL_TICKS)return false;
         if(IGNORED.size()>256)IGNORED.clear();
         IGNORED.put(((long)mob.getId()<<32)|(target.getId()&0xffffffffL),System.nanoTime()+IGNORE_NANOS);
@@ -63,7 +66,7 @@ final class SourcePursuitGoal extends Goal {
             if(wd>1e-4) {
                 double step=Math.min(wd,Math.clamp(mob.getAttributeValue(Attributes.MOVEMENT_SPEED),.08,.35));
                 mob.setYRot((float)(Math.toDegrees(Math.atan2(wz,wx))-90));mob.yBodyRot=mob.getYRot();
-                if(GolemOrders.golem(mob))HostTerrain.jumpLedge(mob,wx,wz);
+                HostTerrain.jumpLedge(mob,wx,wz);
                 mob.move(MoverType.SELF,new Vec3(wx/wd*step,0,wz/wd*step));
                 if(mob.horizontalCollision && ++avoidTicks>=20){HostNavigation.stuck(mob);avoidTicks=0;}
                 else if(!mob.horizontalCollision)avoidTicks=0;

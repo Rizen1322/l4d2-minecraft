@@ -1,17 +1,13 @@
-# 0.3.1 Alpha — Russian / English Companion
+# 🧱 V2 Alpha — co-op, Steve rendering and mob routes
 
-Switch **RU / EN** in the sidebar without restarting. Your selection is saved for the next launch. All app labels, status messages, invitations and app-generated errors support both languages. External tool logs retain their original text.
+V2 separates moving-player/mob snapshots from reliable combat and building events. Building backlogs no longer hold every newer pose in the same delivery queue. Unassigned attacks get priority, same-session reconnects replace their old socket, and stale snapshots expire even when retransmitted.
 
-This patch adds translation round-trip tests, dynamic message checks and backward compatibility for existing settings. Both WPF languages were rendered and checked, including the setup and co-op pages.
+Remote Steve/mob positions interpolate without changing authoritative collision. A wider guest capture reduces screen-edge gaps during fast turns without resizing windows. Bridged teammates get an original Steve-shaped native glow; original survivor glow is restored when the bridge stops.
 
-Download **L4D2MC-Companion.exe** below. Run it, open **Установка**, check the detected game folders and click **Установить мод**. The app downloads this release's source archive and official build tools. Install L4D2 Authoring Tools through its Steam button if needed. Both games must be closed during installation.
+Shield contacts/exhaustion play Minecraft block/break sounds. Sword and golem hits use native slash/club damage with impact force. Golems keep usable routes while recalculating, resume from current progress and wait for pending routes. Generic ground mobs can wander/fight; specials and Tanks can pursue registered Minecraft mobs. Small-obstacle jumping extends to ground fighters.
 
-**Кооператив** creates a private LAN/VPN invitation or joins a friend's room using your own L4D2 nickname. **Играть** starts the bridge and L4D2 at the selected borderless resolution. Launch the Minecraft profile through your normal launcher first.
+**Download L4D2MC-Companion.exe below**, choose RU / EN and open Setup / Установка. Update both co-op PCs with both games closed. Launch the Minecraft profile through your normal launcher, then start the bridge/L4D2. Co-op needs LAN/VPN connectivity; the EXE is unsigned. Windows 10/11, .NET Framework 4.8, Steam L4D2, Minecraft Java 26.3/Java 25 and official L4D2 Authoring Tools remain required.
 
-Minecraft weak/strong/sweep sounds now accompany hits against Source infected. Confirmed hit sounds are deduplicated across retries; dead infected do not generate successful-hit sounds. No Minecraft audio files are distributed.
+Validation: 137 Python tests, Java motion/policy tests, native x86/cursor checks, 11 Source suites, WPF build/tests and a retail L4D2 glow/damage API probe. ReShade compiled the new shader in-game. A fresh two-PC flight/combat run and visual/audio confirmation remain pending. Interpolation cannot eliminate latency; reprojection cannot recover previously hidden surfaces. Flying/water mobs, bosses and special pin animations against guest mobs remain incomplete. [V2 details](https://github.com/Rizen1322/l4d2-minecraft/blob/master/docs/V2.md).
 
-Requirements: Windows 10/11, .NET Framework 4.8, Steam L4D2, Minecraft Java 26.3 and official L4D2 Authoring Tools. Shared LAN/VPN connectivity is still required for co-op. The EXE is unsigned.
-
-Validation: WPF release build and visual preview; real child-process Unicode/quoted arguments; invitation and archive checks; clean GitHub download, complete tool preparation and native/Fabric/Source build; 134 Python tests and 11 Source regression suites. Local installed components updated without launching games. Actual game audio and installation on a second PC still need verification.
-
-The source ZIP contains code and documentation. Game-derived JARs, HUD portraits, private configs, saves and downloaded toolchains are excluded. SHA-256 files accompany both assets.
+Public assets contain the companion and source only. Game-derived JAR/HUD assets, worlds, private configs and downloaded toolchains are excluded. SHA-256 files accompany both downloads.

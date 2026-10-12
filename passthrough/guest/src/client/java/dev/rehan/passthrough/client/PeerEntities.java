@@ -20,7 +20,7 @@ public final class PeerEntities {
     private static volatile EntityRosterPolicy.Snapshot snapshot;
     private static ClientLevel level;
     private static long scene;
-    private record Copy(String type,Entity entity) {}
+    private record Copy(String type,Entity entity,dev.rehan.passthrough.MotionTrack motion) {}
     private static final Map<Long,Copy> copies=new HashMap<>();
     private static final IdentityHashMap<Entity,Boolean> visuals=new IdentityHashMap<>();
     private static final IdentityHashMap<Entity,long[]> targets=new IdentityHashMap<>();
@@ -65,11 +65,12 @@ public final class PeerEntities {
                 while(level.getEntity(nextId)!=null)nextId--;entity.setId(nextId--);
                 entity.noPhysics=true;entity.setNoGravity(true);entity.setPermanentlyInvulnerable(true);
                 if(entity instanceof Mob mob)mob.setNoAi(true);
-                copy=new Copy(row.type(),entity);copies.put(key,copy);visuals.put(entity,true);
+                copy=new Copy(row.type(),entity,new dev.rehan.passthrough.MotionTrack(100_000_000L));copies.put(key,copy);visuals.put(entity,true);
                 targets.put(entity,new long[]{owner.id(),row.id()});level.addEntity(entity);
             }
-            Entity entity=copy.entity();entity.setPos(row.x(),row.y(),row.z());
-            entity.xo=entity.xOld=row.x();entity.yo=entity.yOld=row.y();entity.zo=entity.zOld=row.z();
+            long now=System.nanoTime();copy.motion().observe(row.x(),row.y(),row.z(),now);var at=copy.motion().sample(now);
+            Entity entity=copy.entity();entity.setPos(at[0],at[1],at[2]);
+            entity.xo=entity.xOld=at[0];entity.yo=entity.yOld=at[1];entity.zo=entity.zOld=at[2];
             entity.setYRot(row.yaw());entity.yRotO=row.yaw();entity.setXRot(row.pitch());entity.xRotO=row.pitch();
             entity.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
             if(entity instanceof LivingEntity living)living.yHeadRot=living.yHeadRotO=living.yBodyRot=living.yBodyRotO=row.yaw();

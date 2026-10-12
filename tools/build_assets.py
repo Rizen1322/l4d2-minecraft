@@ -57,6 +57,22 @@ def cube_smd() -> str:
     return '\n'.join(lines + ['end',''])
 
 
+def aura_smd() -> str:
+    """Original six-box silhouette; no Minecraft textures or player skeleton."""
+    lines=['version 1','nodes','0 "root" -1','end','skeleton','time 0','0 0 0 0 0 0 0','end','triangles']
+    # Source forward is X, Steve's shoulders extend along Y. 2 Source units/pixel.
+    boxes=[((-8,-8,48),(8,8,64)),((-4,-8,24),(4,8,48)),
+           ((-4,-16,24),(4,-8,48)),((-4,8,24),(4,16,48)),
+           ((-4,-8,0),(4,0,24)),((-4,0,0),(4,8,24))]
+    template=cube_smd().split('triangles\n',1)[1].rsplit('end',1)[0].splitlines()
+    for low,high in boxes:
+        for line in template:
+            if line=='dirt':lines.append('aura');continue
+            values=line.split();coords=[float(v) for v in values[1:4]]
+            mapped=[low[i]+(coords[i]+16)/32*(high[i]-low[i]) for i in range(3)]
+            lines.append('0 '+' '.join(str(v) for v in mapped)+' '+' '.join(values[4:]))
+    return '\n'.join(lines+['end',''])
+
 def build(game: Path) -> None:
     compiler = game / 'bin' / 'studiomdl.exe'
     if not compiler.is_file():
@@ -73,6 +89,10 @@ def build(game: Path) -> None:
         (materials / f'{kind}.vmt').write_text(
             f'"VertexLitGeneric"\n{{\n "$basetexture" "l4d2mc/{kind}"\n "$surfaceprop" "{ "wood" if kind != "stone" else "stone" }"\n}}\n')
     (src / 'cube.smd').write_text(cube_smd())
+    write_vtf(Image.new('RGBA',(16,16),(255,255,255,255)),materials/'aura.vtf')
+    (materials/'aura.vmt').write_text('"VertexLitGeneric"\n{\n "$basetexture" "l4d2mc/aura"\n}\n')
+    (src/'steve_aura.smd').write_text(aura_smd())
+    (src/'steve_aura.qc').write_text('$modelname "l4d2mc/steve_aura.mdl"\n$body steve "steve_aura.smd"\n$cdmaterials "l4d2mc/"\n$sequence idle "steve_aura.smd"\n$surfaceprop "flesh"\n')
     (src / 'cube.qc').write_text('''$modelname "l4d2mc/cube.mdl"
 $staticprop
 $body cube "cube.smd"
@@ -110,6 +130,10 @@ $collisionmodel "cube.smd"
     target.mkdir(parents=True, exist_ok=True)
     for file in built.glob('cube.*'):
         shutil.copy2(file, target / file.name)
+    aura=subprocess.run([str(compiler),'-nop4','-game',str(staging),str(src/'steve_aura.qc')],cwd=game/'bin',capture_output=True)
+    (ROOT/'evidence'/'aura-model-build.log').write_bytes(aura.stdout+aura.stderr)
+    if aura.returncode!=0 or not (built/'steve_aura.mdl').exists():raise RuntimeError('Aura model build failed; see evidence/aura-model-build.log')
+    for file in built.glob('steve_aura.*'):shutil.copy2(file,target/file.name)
     print('Cube assets built:', target)
 
 

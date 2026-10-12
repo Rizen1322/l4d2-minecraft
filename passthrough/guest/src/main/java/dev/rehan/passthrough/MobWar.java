@@ -76,10 +76,10 @@ public final class MobWar {
 		return e instanceof Villager && (e.entityTags().contains(PROXY_TAG) || e.level().isClientSide() && e.isInvisible());
 	}
 
-	/** Mobs that join the fight: hostile, goal-driven ones. */
+	/** Hostiles and protectors; brain-driven mobs also receive attack memories. */
 	private static boolean fighter(final Entity e) {
 		String kind=BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getPath();
-        return e instanceof Mob && !isProxy(e) && ((e instanceof Enemy && !BRAIN_MOBS.contains(kind)) || kind.equals("iron_golem") || kind.equals("snow_golem"));
+        return e instanceof Mob && !isProxy(e) && (e instanceof Enemy || kind.equals("iron_golem") || kind.equals("snow_golem"));
 	}
 
     public static boolean targetFor(final Mob mob, final LivingEntity target) {
@@ -91,8 +91,7 @@ public final class MobWar {
         if(faction==null)return false;
         String kind=BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath();
         boolean protector=kind.equals("iron_golem") || kind.equals("snow_golem");
-        // Melee golems cannot reach infected on another floor (they would stare through it).
-        if(protector && Math.abs(target.getY()-mob.getY())>3.0)return false;
+        // Source routes decide reachability, including stairs between floors.
         return faction==(protector?1:0) && GolemOrders.permits(mob,target);
     }
 
@@ -115,6 +114,10 @@ public final class MobWar {
 		}
 
 		if (!fighter(e)) {
+            if(e instanceof Mob passive && !isProxy(e)){
+                var goals=((MobAccessor)passive).passthrough$goalSelector();
+                if(goals.getAvailableGoals().stream().noneMatch(g->g.getGoal() instanceof SourceWanderGoal))goals.addGoal(1,new SourceWanderGoal(passive));
+            }
 			return;
 		}
 
@@ -156,6 +159,10 @@ public final class MobWar {
 	static void tick(final MinecraftServer s) {
 		ServerLevel level = s.overworld();
 		syncProxies(level);
+        if(Passthrough.active)for(var e:level.getAllEntities())if(e instanceof Mob mob && BRAIN_MOBS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath()) && MapBuilds.ownsEntity(mob)) {
+            var target=nearestProxy(level,mob);var memory=net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET;
+            if(target!=null)mob.getBrain().setMemory(memory,target);else mob.getBrain().eraseMemory(memory);
+        }
 		applyDamage(level);
 		if (Passthrough.active) {
 			reportMobs(s, level);
@@ -262,7 +269,8 @@ public final class MobWar {
 			return;
 		}
 
-		List<Entity> near = level.getEntities((Entity) null, player.getBoundingBox().inflate(REPORT_RANGE), MobWar::fighter);
+		List<Entity> near = level.getEntities((Entity) null, player.getBoundingBox().inflate(REPORT_RANGE), e->e instanceof Mob && !isProxy(e) && MapBuilds.ownsEntity(e));
+        near.sort(java.util.Comparator.comparingDouble(player::distanceToSqr));
 		if (near.isEmpty() && !reportedMobs) {
 			return;
 		}
@@ -270,6 +278,7 @@ public final class MobWar {
 		StringBuilder b = new StringBuilder("{\"t\":\"mobs\",\"m\":[");
 		int n = 0;
 		for (Entity e : near) {
+            if(n>=64)break;
 			if(e instanceof Mob mob && mob.getTarget()!=null && isProxy(mob.getTarget()) && !targetFor(mob,mob.getTarget()))mob.setTarget(null);
 			if (!e.isAlive()) {
 				continue;

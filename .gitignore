@@ -33,3 +33,7 @@ output/
 release/
 companion/**/bin/
 companion/**/obj/
+# Generated original Steve glow geometry; rebuilt from tools/build_assets.py.
+addon/models/l4d2mc/steve_aura.*
+addon/materials/l4d2mc/aura.*
+assets-src/steve_aura.*

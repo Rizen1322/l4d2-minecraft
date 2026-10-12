@@ -15,6 +15,7 @@ class Enemy {
     constructor(i=4,x=16){id=i;pos=Vector(x,0,0);}
     function GetHealth(){return hp;}function GetClassname(){return kind;}
     function GetOrigin(){return pos;}function IsValid(){return true;}function GetEntityIndex(){return id;}
+    function SetOrigin(p){pos=p;}function SetHealth(h){hp=h;}
     function IsSurvivor(){return false;}
     function TakeDamage(d,t,attacker){hits++;amount=d;hp-=d;}
 }
@@ -70,4 +71,26 @@ b.survival<-{golems={}};b.survival.golems[1]<-{entity=nearest,pos=Vector(2400,0,
 local json=b.ActorJson(Enemy(902,0));
 if(json.find("0.2500,0.0000,")==null)throw "Enumeration cap starved nearby live target";
 if(json.find("78.1250,0.0000,")==null)throw "Player-only range starved golem enemy";
+dofile("passthrough/host/l4d2mc_survival.nut");
+b.survival.aggroHits<-{};b.survival.nextAggro<-0;
+class Tank extends Enemy {function GetZombieType(){return 8;}}
+local tank=Tank(903,20);tank.kind="player";
+local mobTarget=Enemy(904,16),commands=[],damageReplies=[];
+::Entities.Next<-function(previous){return null;};
+::UniqueString<-function(value){return value;};
+::SpawnEntityFromTable<-function(kind,fields){return mobTarget;};
+b.GolemTarget(["golem","777","pig","16","0","0"],Enemy(905,0));
+if(!(777 in b.survival.golems))throw "Passive mob rejected by native target registry";
+b.GolemTarget(["golem","778","../pig","16","0","0"],Enemy(905,0));
+if(778 in b.survival.golems)throw "Malformed mob identifier accepted";
+::IsPlayerABot<-function(e){return true;};
+::CommandABot<-function(command){commands.append(command);};
+::Entities.FindByClassnameWithin<-function(previous,kind,origin,range){
+    local list=kind=="player"?[tank]:actors;
+    local next=previous==null?0:list.find(previous)+1;return next<list.len()?list[next]:null;
+};
+b.Reply=function(value){damageReplies.append(value);return true;};b.Raycast=function(a,c,d){return {hit=false};};
+b.GolemAggroTick(Enemy(905,0));
+if(commands.len()==0 || commands[0].bot!=tank)throw "Horde enumeration starved Tank aggro";
+if(damageReplies.len()==0 || damageReplies[0].find("15.00")==null || damageReplies[0].find("777")==null)throw "Tank did not attack the registered Minecraft mob";
 print("Source golem one-hit, corpse and wall regressions passed\n");

@@ -80,7 +80,7 @@ abstract class CameraMixin {
 	private void passthrough$hostFov(final float partialTicks, final CallbackInfoReturnable<Float> cir) {
 		HostState.Pose p = HostState.frame();
 		if (p != null) {
-			cir.setReturnValue(p.fov());
+			cir.setReturnValue(dev.rehan.passthrough.WorldProjection.renderFov(p.fov()));
 		}
 	}
 

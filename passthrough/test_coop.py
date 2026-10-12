@@ -134,6 +134,41 @@ class CoopLoopbackTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(LEASE+.2)
             self.assertIn(2,[row['id'] for row in self.host.roster(1)['players']])
 
+    async def test_same_session_reconnect_replaces_socket_without_losing_edits(self):
+        old=await websockets.connect(f'ws://127.0.0.1:{self.port}')
+        try:
+            hello={'t':'join','token':TOKEN,'userid':2,'session':'v2-resume'}
+            await old.send(json.dumps(hello));await old.recv()
+            self.host.guest_event({'t':'peerblocks','scene':self.host.scene,'rows':[[8,1,1,17]]})
+            async with websockets.connect(f'ws://127.0.0.1:{self.port}') as fresh:
+                await fresh.send(json.dumps(hello));answer=json.loads(await fresh.recv())
+                self.assertEqual(answer['t'],'joined')
+                await fresh.send(json.dumps({'t':'tick','scene':self.host.scene,'events':[]}))
+                answer=json.loads(await fresh.recv())
+                self.assertTrue(any([8,1,1,17] in e.get('rows',[]) for e in answer['events']))
+                self.assertIn(2,self.host.clients)
+        finally:await old.close()
+
+    async def test_snapshot_lane_remains_fresh_while_build_queue_is_unacknowledged(self):
+        remote=await self.join();self.assertTrue(remote.snapshot_lane)
+        for i in range(100):remote.guest_event({'t':'peerblocks','scene':remote.scene,'rows':[[i,1,1,17]]})
+        remote.guest_event({'t':'peerentitystate','scene':remote.scene,'rows':[[7,'minecraft:pig',20,1,0,0,0]]})
+        await until(lambda:2 in self.host.entity_states)
+        for i in range(20):remote.guest_event({'t':'peerentitystate','scene':remote.scene,'rows':[[7,'minecraft:pig',21+i,1,0,0,0]]})
+        await until(lambda:self.host.entity_states[2][0][0][2]==40)
+        self.assertEqual(len(remote.snapshots),1)
+        self.assertFalse(any(e['t']=='peerentitystate' for e in remote.guest_out))
+
+    async def test_combat_priority_preserves_assigned_event_sequence_order(self):
+        remote=CoopLink({'mode':'join'},Path(self.temp.name)/'priority',scene_token)
+        for i in range(20):remote.guest_event({'t':'peerblocks','scene':self.host.scene,'rows':[[i,1,1,17]]})
+        first=remote.send_batch()
+        remote.guest_event({'t':'peerattack','scene':self.host.scene,'owner':1,'id':7,'d':4})
+        self.assertEqual(remote.send_batch(),first,'In-flight events were reordered')
+        for _ in range(8):remote.guest_out.popleft()
+        next_batch=remote.send_batch();self.assertEqual(next_batch[0]['t'],'peerattack')
+        self.assertEqual([e['_id'] for e in next_batch],list(range(9,17)))
+
     async def test_peer_attack_routes_only_to_live_nearby_entity_owner(self):
         remote=await self.join()
         self.host.guest_event({'t':'peerentitystate','scene':self.host.scene,'rows':[[7,'minecraft:pig',20,1,0,0,0]]})

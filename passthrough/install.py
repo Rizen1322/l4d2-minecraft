@@ -218,7 +218,7 @@ def install_guest_profile(source,target,manifest):
 def guest(manifest):
     global MINECRAFT
     MINECRAFT=MINECRAFT or minecraft_path()
-    jar = ROOT / "passthrough/guest/build/libs/passthrough-0.2.0.jar"
+    jar = ROOT / "passthrough/guest/build/libs/passthrough-2.0.0.jar"
     if not jar.exists():
         raise RuntimeError("Build guest jar first")
     # Flatten the official vanilla + Fabric metadata. Replace only the gameDir

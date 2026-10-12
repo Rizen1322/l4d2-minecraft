@@ -44,6 +44,7 @@ public final class PeerAvatars {
         private double lastX=Double.NaN,lastZ;
         private String main="",off="";
         private boolean equippedElytra;
+        private final dev.rehan.passthrough.MotionTrack motion=new dev.rehan.passthrough.MotionTrack();
         PeerAvatar(ClientLevel level,Minecraft mc){super(level,mc.playerSkinRenderCache());noPhysics=true;setNoGravity(true);setPermanentlyInvulnerable(true);}
         @Override public PlayerSkin getSkin(){return DefaultPlayerSkin.get(new java.util.UUID(0,15));}
         @Override public boolean isPickable(){return false;}
@@ -52,7 +53,7 @@ public final class PeerAvatars {
         @Override public boolean canCollideWith(Entity other){return false;}
         @Override public void tick(){tickCount++;if(member==null)return;float distance=Double.isNaN(lastX)?0:(float)Math.min(Math.hypot(getX()-lastX,getZ()-lastZ)*4,1);walkAnimation.update(distance,0.4F,1);lastX=getX();lastZ=getZ();}
         void apply(PeerRoster.Member peer){
-            member=peer;setPos(peer.x(),peer.y(),peer.z());xo=xOld=peer.x();yo=yOld=peer.y();zo=zOld=peer.z();
+            member=peer;long now=System.nanoTime();motion.observe(peer.x(),peer.y(),peer.z(),now);var pos=motion.sample(now);setPos(pos[0],pos[1],pos[2]);xo=xOld=pos[0];yo=yOld=pos[1];zo=zOld=pos[2];
             setYRot(peer.yaw());yRotO=peer.yaw();yBodyRot=yBodyRotO=yHeadRot=yHeadRotO=peer.yaw();setXRot(peer.pitch());xRotO=peer.pitch();
             setSharedFlag(FLAG_FALL_FLYING,peer.flying());
             if(!main.equals(peer.main())){main=peer.main();setItemSlot(EquipmentSlot.MAINHAND,item(main));}

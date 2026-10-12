@@ -8,6 +8,7 @@ class Model {
     constructor(i,flags=0,mode=0,color=-1){id=i;props={m_fEffects=flags,m_nRenderMode=mode,m_clrRender=color};}
     function IsValid(){return valid;}
     function GetEntityIndex(){return id;}
+    function GetOrigin(){return null;}function GetAngles(){return null;}function SetAngles(p){}function GetHealth(){return 100;}function SetOrigin(p){}function Kill(){valid=false;}
 }
 ::NetProps<-{
     HasProp=function(e,p){return p in e.props;},
@@ -54,4 +55,12 @@ local survivor=Model(20,0,1,-1);b.HideSurvivor(survivor);
 if(!Hidden(survivor))throw "Survivor attachments still drawn in F5";
 b.HideSurvivor(survivor);b.RestoreHidden(20);
 if(!Native(survivor,0,1))throw "Survivor appearance not restored";
+local aura=null,spawns=0;
+::SpawnEntityFromTable<-function(kind,kv){spawns++;aura=Model(999);aura.props["m_Glow.m_iGlowType"]<-0;aura.props["m_Glow.m_glowColorOverride"]<-0;return aura;};
+::EntFireByHandle<-function(e,input,value,delay,activator,caller){if(input=="SetParent" && activator==survivor)parents++;};
+survivor.props["m_bSurvivorGlowEnabled"]<-1;survivor.props["m_Glow.m_iGlowType"]<-3;survivor.props["m_Glow.m_glowColorOverride"]<-123;
+b.HideSurvivor(survivor);b.HideSurvivor(survivor);
+if(spawns!=1 || survivor.props["m_Glow.m_iGlowType"]!=0 || aura.props["m_Glow.m_iGlowType"]!=3 || aura.props["m_Glow.m_glowColorOverride"]!=123)throw "Steve aura duplicated or native glow not transferred";
+b.RestoreHidden(20);
+if(aura.IsValid() || survivor.props["m_Glow.m_iGlowType"]!=3 || survivor.props["m_bSurvivorGlowEnabled"]!=1)throw "Steve aura or survivor glow leaked after detach";
 print("Third-person weapon and drop visibility regressions passed\n");

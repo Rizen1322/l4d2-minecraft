@@ -15,6 +15,8 @@ final class CombatAudio {
             case "weak" -> SoundEvents.PLAYER_ATTACK_WEAK;
             case "crit" -> SoundEvents.PLAYER_ATTACK_CRIT;
             case "miss" -> SoundEvents.PLAYER_ATTACK_NODAMAGE;
+            case "shieldblock" -> SoundEvents.SHIELD_BLOCK.value();
+            case "shielddisable" -> SoundEvents.SHIELD_BREAK.value();
             default -> null;
         };
         if(sound!=null)player.playSound(sound,0.85F,1.0F);

@@ -75,6 +75,7 @@ class CoopLink:
         self.entity_states={};self.peer_entities=None
         self.task=None;self.server=None;self.ready=False;self.error=None
         self.status=None
+        self.snapshot_lane=False;self.snapshots={};self.snapshot_times={}
     def set_status(self,state,detail):
         value={'state':state,'detail':detail}
         if value==self.status:return
@@ -93,6 +94,9 @@ class CoopLink:
         if self.joining:
             # Snapshots supersede unsent snapshots; edits must survive congestion.
             event=dict(event)
+            if event['t'] in ('avatar','peerentitystate'):self.snapshot_times[event['t']]=time.monotonic()
+            if self.snapshot_lane and event['t'] in ('avatar','peerentitystate'):
+                self.snapshots[event['t']]=event;return
             if event['t']=='peerattack' and sum(e['t']=='peerattack' for e in self.guest_out)>=64:raise ValueError('Peer attack backlog limit')
             if event['t'] in ('avatar','peerentitystate'):
                 self.guest_out=deque(e for e in self.guest_out if e.get('_id') or e['t']!=event['t'])
@@ -111,6 +115,17 @@ class CoopLink:
             rows=[[*pos,state] for pos,state in values.items()]
             for start in range(0,len(rows),256):retained.append({'t':'peerblocks','scene':scene,'bootstrap':bootstrap,'rows':rows[start:start+256]})
         self.guest_out=deque(retained)
+    def send_batch(self):
+        # Never reorder assigned sequence IDs. Promote new combat ahead of unsent
+        # build traffic before assigning IDs, keeping cumulative ACKs contiguous.
+        assigned=[e for e in self.guest_out if e.get('_id')]
+        unsent=[e for e in self.guest_out if not e.get('_id')]
+        unsent.sort(key=lambda e:0 if e['t']=='peerattack' else 1)
+        self.guest_out=deque(assigned+unsent)
+        events=list(self.guest_out)[:8]
+        for event in events:
+            if '_id' not in event:self.event_sequence+=1;event['_id']=self.event_sequence
+        return events
     def enqueue_blocks(self,queue,message):
         # A bounded full-room resync replaces an overflowing delta backlog.
         # One slow recipient must never disconnect the healthy sender.
@@ -244,6 +259,8 @@ class CoopLink:
             hello=json.loads(await asyncio.wait_for(socket.recv(),5))
             if not isinstance(hello,dict):raise ValueError('Invalid room greeting')
             token=hello.get('token','');uid=hello.get('userid')
+            session=hello.get('session')
+            if session is not None and (not isinstance(session,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',session)):raise ValueError('Invalid room session')
             if isinstance(hello.get('player'),str):
                 matches=[ident for ident,record in self.players.items() if record.get('name')==hello['player'] and ident!=self.local_id]
                 uid=matches[0] if len(matches)==1 else None
@@ -251,24 +268,27 @@ class CoopLink:
             if not isinstance(token,str) or not hmac.compare_digest(token,self.config['token']):reason='token'
             elif not self.ready:reason='source'
             elif type(uid) is not int or uid not in self.players or uid==self.local_id:reason='player'
-            elif uid in self.clients:reason='occupied'
-            elif len(self.clients)>=MAX_PLAYERS-1:reason='full'
+            elif uid in self.clients and not (session is not None and self.clients[uid].get('session')==session):reason='occupied'
+            elif uid not in self.clients and len(self.clients)>=MAX_PLAYERS-1:reason='full'
             if reason:
                 # Only disclose roster names after authenticating the private room token.
                 names=[str(record.get('name',''))[:96] for ident,record in self.players.items() if ident!=self.local_id][:3] if reason=='player' else []
                 await socket.send(json.dumps({'t':'rejected','reason':reason,'players':names},ensure_ascii=True))
                 await socket.close(1008,'l4d2mc:'+reason);return
-            session=hello.get('session')
-            if session is not None and (not isinstance(session,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',session)):raise ValueError('Invalid room session')
             session_key=(uid,session);reliable=session is not None
             if reliable:
                 self.event_sessions.setdefault(session_key,0);self.event_sessions.move_to_end(session_key)
                 while len(self.event_sessions)>32:self.event_sessions.popitem(last=False)
-            state={'at':time.monotonic(),'events':self.inboxes.setdefault(uid,deque()),'socket':socket};self.clients[uid]=state
+            previous=self.clients.get(uid)
+            state={'at':time.monotonic(),'events':self.inboxes.setdefault(uid,deque()),'socket':socket,'session':session};self.clients[uid]=state
+            if previous is not None:
+                try:await asyncio.wait_for(previous['socket'].close(1000,'Same bridge session resumed'),1)
+                except asyncio.TimeoutError:pass
             values=[[ *pos,value] for pos,value in self.ledger.items()]
             for index in range(0,len(values),256):self.enqueue_blocks(state['events'],{'t':'coopblocks','scene':self.scene,'rows':values[index:index+256]})
-            await socket.send(json.dumps({'t':'joined','userid':uid,'reliable_events':True,'transport':self.session}))
+            await socket.send(json.dumps({'t':'joined','userid':uid,'reliable_events':True,'snapshot_lane':True,'transport':self.session}))
             async for raw in socket:
+                if self.clients.get(uid) is not state:break
                 request=json.loads(raw)
                 if not isinstance(request,dict):raise ValueError('Invalid room message')
                 if request.get('t')!='tick':raise ValueError('Invalid room message')
@@ -282,6 +302,12 @@ class CoopLink:
                 if not isinstance(events,list) or len(events)>64:raise ValueError('Event batch limit')
                 if request.get('scene')==self.scene:
                     for kind,text in files.items():self.accept_file(uid,kind,text)
+                    snapshots=request.get('snapshots',[])
+                    if not isinstance(snapshots,list) or len(snapshots)>2:raise ValueError('Snapshot batch limit')
+                    seen=set()
+                    for snapshot in snapshots:
+                        if not isinstance(snapshot,dict) or snapshot.get('t') not in ('avatar','peerentitystate') or snapshot['t'] in seen:raise ValueError('Invalid room snapshot')
+                        seen.add(snapshot['t']);self.apply_guest(uid,snapshot)
                 for event in events:
                     if not isinstance(event,dict) or event.get('t') not in ('peerblocks','avatar','peerentitystate','peerattack'):raise ValueError('Invalid guest event')
                     ident=event.get('_id')
@@ -385,12 +411,21 @@ class CoopLink:
                     transport=answer.get('transport')
                     if transport!=getattr(self,'transport',None):self.delivery_ack=0;self.delivery_seen=0;self.transport=transport
                     self.ready=True
+                    self.snapshot_lane=answer.get('snapshot_lane') is True
+                    if self.snapshot_lane:
+                        kept=deque()
+                        for event in self.guest_out:
+                            if event['t'] in ('avatar','peerentitystate') and not event.get('_id'):self.snapshots[event['t']]=event
+                            else:kept.append(event)
+                        self.guest_out=kept
+                    else:
+                        for event in self.snapshots.values():self.guest_event(event)
+                        self.snapshots.clear()
                     while True:
                         tick_at=time.monotonic()
-                        events=list(self.guest_out)[:8]
-                        for event in events:
-                            if '_id' not in event:self.event_sequence+=1;event['_id']=self.event_sequence
-                        await socket.send(json.dumps({'t':'tick','scene':self.scene,'files':dict(self.files),'events':events,'delivery_ack':self.delivery_ack}))
+                        events=self.send_batch()
+                        snapshots=[event for kind,event in self.snapshots.items() if tick_at-self.snapshot_times.get(kind,-math.inf)<.75]
+                        await socket.send(json.dumps({'t':'tick','scene':self.scene,'files':dict(self.files),'events':events,'snapshots':snapshots,'delivery_ack':self.delivery_ack}))
                         result=json.loads(await asyncio.wait_for(socket.recv(),NETWORK_LEASE))
                         if not isinstance(result,dict) or result.get('t')!='tick':raise ValueError('Invalid room tick')
                         ack=result.get('event_ack',0) if reliable else max([e['_id'] for e in events],default=0)
@@ -398,6 +433,8 @@ class CoopLink:
                         while self.guest_out and self.guest_out[0].get('_id',math.inf)<=ack:self.guest_out.popleft()
                         if self.scene is not None and result.get('scene')!=self.scene:
                             self.files.clear();self.outbound.clear();self.receipts.clear();self.ledger.clear()
+                            self.snapshots.clear()
+                            self.snapshot_times.clear()
                             self.guest_out=deque(e for e in self.guest_out if e.get('scene')==result.get('scene'))
                         self.scene=result.get('scene');self.sample=result.get('sample');self.received=time.monotonic()
                         if self.sample:

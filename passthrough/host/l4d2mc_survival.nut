@@ -129,8 +129,9 @@ L4D2MCBridge.ShieldSpend <- function(e) {
     local id=e.GetEntityIndex();
     if(id in survival.shieldHitAt && survival.shieldHitAt[id].entity==e && Time()-survival.shieldHitAt[id].at<1.2)return true;
     survival.shieldHitAt[id]<-{entity=e,at=Time()};
+    Reply("\"t\":\"attacksound\",\"kind\":\"shieldblock\"");
     survival.shieldCharge-=e.GetClassname()=="player"?2:1;
-    if(survival.shieldCharge<=0){survival.shieldCharge=0;survival.shieldCooldown=Time()+5;Reply("\"t\":\"shieldcooldown\",\"ticks\":100");}
+    if(survival.shieldCharge<=0){survival.shieldCharge=0;survival.shieldCooldown=Time()+5;Reply("\"t\":\"shieldcooldown\",\"ticks\":100");Reply("\"t\":\"attacksound\",\"kind\":\"shielddisable\"");}
     return true;
 };
 L4D2MCBridge.Effects <- function(f) {
@@ -140,7 +141,7 @@ L4D2MCBridge.Effects <- function(f) {
 };
 L4D2MCBridge.Reply <- function(body) {
     local count=0;foreach(id,value in gameplay.replies)count++;
-    if(count>=64)return false;
+    if(count>=64 || (count>=32 && body.find("\"t\":\"attacksound\"")!=null))return false;
     survival.replySerial++;
     local id=survival.replySerial;
     gameplay.replies[id]<-format("{\"rid\":%d,%s}",id,body);
@@ -366,13 +367,14 @@ L4D2MCBridge.SurvivalCleanup <- function() {
     if("swordAt" in survival)delete survival.swordAt;
     if("dropLatch" in survival)survival.dropLatch=false;
 };
-// Eight non-solid invisible targets, not collision stand-ins. Native infected navigation pursues them.
+// Sixteen non-solid targets across mob kinds; native infected navigation pursues them.
 L4D2MCBridge.GolemTarget <- function(f,player) {
-    if(f.len()!=6 || (f[2]!="iron_golem" && f[2]!="snow_golem"))return;
+    if(f.len()!=6 || f[2].len()==0 || f[2].len()>48)return;
+    foreach(c in f[2])if(!((c>=97 && c<=122) || (c>=48 && c<=57) || c==95))return;
     local id=Integer(f[1]),p=Vector(Number(f[3]),Number(f[4]),Number(f[5]));
     if((p-player.GetOrigin()).Length()>1536)return;
     if(!(id in survival.golems)) {
-        if(survival.golems.len()>=8)return;
+        if(survival.golems.len()>=16)return;
         local count=0,e=null;while((e=Entities.Next(e))!=null)count++;if(count>=1400)return;
         local e=SpawnEntityFromTable("info_target",{targetname=UniqueString("l4d2mc_golem_"),origin=p});
         if(e==null)return;e.SetHealth(100);
@@ -388,12 +390,13 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
     foreach(id in stale)delete survival.aggroHits[id];
     if(Time()<survival.nextAggro || survival.golems.len()==0 || !("CommandABot" in getroottable()))return;
     survival.nextAggro=Time()+0.25;local count=0;
-    local bots=[];foreach(cls in ["infected","player"]) {
+    // A horde used to fill all 64 slots before special infected were enumerated.
+    local bots=[];foreach(cls in ["player","infected"]) {
         local e=null;while((e=Entities.FindByClassnameWithin(e,cls,player.GetOrigin(),1536))!=null && bots.len()<64)
-            if(e.GetHealth()>0 && (cls=="infected" || (!e.IsSurvivor() && IsPlayerABot(e))))bots.append(e);
+            if(ActorAlive(e) && (cls=="infected" || (!e.IsSurvivor() && IsPlayerABot(e))))bots.append(e);
     }
     foreach(e in bots) {
-        local best=null,bestId=0,dist=384.0;
+        local best=null,bestId=0,dist=768.0;
         foreach(id,v in survival.golems) {
             local d=(v.pos-e.GetOrigin()).Length();if(d>=dist || abs(v.pos.z-e.GetOrigin().z)>128)continue;
             local t=Raycast(e.GetOrigin()+Vector(0,0,32),v.pos+Vector(0,0,32),e);
@@ -403,10 +406,11 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
         if(best==null)continue;
         if(count++>=16)break;
         // Do not redirect a special that is already pinning a survivor.
-        local pin=false;foreach(prop in ["m_pounceVictim","m_jockeyVictim","m_tongueVictim","m_carryVictim"])
+        local pin=false;foreach(prop in ["m_pounceVictim","m_jockeyVictim","m_tongueVictim","m_carryVictim","m_pummelVictim"])
             if(NetProps.HasProp(e,prop) && NetProps.GetPropEntity(e,prop)!=null)pin=true;
         if(pin)continue;
-        CommandABot({bot=e,target=best.entity,cmd=0});
+        if(e.GetClassname()=="player" && dist>=72)CommandABot({bot=e,pos=best.pos,cmd=1});
+        else CommandABot({bot=e,target=best.entity,cmd=0});
         local ix=e.GetEntityIndex();
         if(dist<72 && (!(ix in survival.aggroHits) || survival.aggroHits[ix].entity!=e || Time()-survival.aggroHits[ix].at>=1)) {
             // No solid proxy can trap survivors. Damage is sent to the real Minecraft mob.

@@ -15,6 +15,8 @@ Real Minecraft running inside a Left 4 Dead 2 session: Source owns the map, move
 
 **Status: playable experiment / alpha.** Solo and a two-player co-op run have been tried by the author. The latest network changes have automated coverage; a full two-PC regression run is still needed. Expect rough edges around geometry, latency and unusual camera states.
 
+**V2** separates moving-player/mob snapshots from reliable combat and building events. It adds smoother remote Steve poses, shield sounds, a native Steve-shaped teammate glow and routes that stay usable during recalculation. [V2 changes and limits](docs/V2.md).
+
 [Install](#-install) · [Co-op](#-co-op) · [Controls](#-controls) · [Architecture](#-how-it-works) · [Troubleshooting](#-when-it-breaks) · [Русская инструкция](docs/FRIEND_GUIDE_RU.md)
 
 ## 🎮 What you can do
@@ -25,7 +27,7 @@ Real Minecraft running inside a Left 4 Dead 2 session: Source owns the map, move
 | Player | Steve, Minecraft hotbar/inventory and camera switching. Walking and jumping remain L4D2's. |
 | Combat | Sword cleave, tier-based Source damage, shields with stagger/cooldown, armour and health synchronization. |
 | Items | TNT, flint-and-steel, food, ender pearls, chorus fruit and held totems. Support varies by item. |
-| Mobs | Minecraft mobs can be spawned; golems use Source navigation queries to fight infected. |
+| Mobs | Ground mobs use Source routes; golems fight infected, hostiles attack survivors and passive mobs wander. Infected, specials and Tanks can target registered Minecraft mobs. |
 | Supplies | L4D2 pickups become Minecraft supplies; rewards and item receipts survive retries. |
 | Flight | Equipped Elytra gliding and firework boosts use native Source velocity/collisions. |
 | Co-op | Shared block states, Steve teammates, separate inventories, remote mob visuals and owner-authoritative melee. |
@@ -54,7 +56,7 @@ Use your own copies of both games and your normal Minecraft launcher. Install th
 
 **Desktop app:** download **L4D2MC-Companion.exe** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases). It finds installed games, downloads and checks the project, prepares build tools, installs the mod and saves host/join settings. Switch **RU / EN** in the sidebar; the app remembers your language. Requires Windows 10/11 with .NET Framework 4.8. Minecraft is still started with your own launcher. [App details and build instructions](companion/README.md).
 
-Sword hits on Source infected now play Minecraft attack sounds. Successful hits are confirmed by Source; duplicate network deliveries do not replay the hit sound. Audio comes from your installed Minecraft and follows its sound settings.
+Sword hits on Source infected play Minecraft attack sounds. Shield contacts and exhausted shield capacity play block/break sounds. Successful contacts are confirmed by Source; duplicate network deliveries do not replay the sound. Audio comes from your installed Minecraft and follows its sound settings.
 
 1. Download the **source ZIP** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases), or clone the repository. Extract it into a permanent folder.
 2. Install the tools above. [INSTALL.md](docs/INSTALL.md) has the tool links and explicit paths.
@@ -188,11 +190,13 @@ sequenceDiagram
 
 Queues are bounded. Unsent snapshots are replaced by newer snapshots; block edits retain state and deletion history. Discrete room actions wait for application receipts. Network membership has its own lease; a frozen Source frame still stops guest controls instead of being kept alive by fresh network traffic.
 
+V2 gives avatar/mob snapshots a separate stream so building backlogs cannot hold up movement. Unassigned attacks go ahead of unassigned build edits; already numbered events retain their order. Reconnection with the same authenticated session replaces its old socket. Re-sending a snapshot does not renew its age: old mob samples still expire.
+
 Projectiles retain their original launch point across coalesced reports. Source traces that first segment immediately, then owns impacts/teleports. Native Source geometry is queried with bounded traces; it is not converted into a full Minecraft voxel map.
 
 ## 🧪 Build and checks
 
-The current co-op patch passed **134 Python tests**, the guest build/policy checks and **11 Source regression suites**. These check real loopback WebSockets, queues, ordering, retries, actor isolation and Source handlers. They do not measure real two-PC FPS or prove every map/item works.
+V2 passed **137 Python tests**, the guest build/policy checks and **11 Source regression suites**. These check real loopback WebSockets, queues, ordering, retries, actor isolation and Source handlers. A local retail L4D2 probe also verified glow transfer/restoration and native damage API support; ReShade compiled the updated shader. These checks do not measure real two-PC FPS or prove every map/item works.
 
 ```powershell
 # Python transport, collision, gameplay, installer and release checks

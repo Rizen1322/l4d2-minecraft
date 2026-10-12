@@ -259,7 +259,7 @@ public final class FrameExporter {
 			m.set(INT, desc + 28, c.height);
 			m.set(FLOAT, desc + 32, NEAR);
 			m.set(FLOAT, desc + 36, c.far);
-			m.set(FLOAT, desc + 40, p.fov());
+			m.set(FLOAT, desc + 40, dev.rehan.passthrough.WorldProjection.renderFov(p.fov()));
 			m.set(INT, desc + 44, (RenderSystem.getDevice().getDeviceInfo().isZZeroToOne() ? 1 : 0) | 2 | 4);
 			// The camera Minecraft actually rendered from: re-projection is exact only for that pose.
 			m.set(DOUBLE, desc + 48, c.camX);

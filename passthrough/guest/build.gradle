@@ -152,7 +152,7 @@ tasks.register('verifyProxyPresence', JavaExec) {
 }
 check.dependsOn verifyProxyPresence
 
-['PeerRoster','FlightPolicy','CoopBlockPolicy','EntityRosterPolicy','PeerAttackPolicy','ProjectileOrigins'].each { policy ->
+['PeerRoster','FlightPolicy','CoopBlockPolicy','EntityRosterPolicy','PeerAttackPolicy','ProjectileOrigins','MotionTrack'].each { policy ->
     tasks.register('verify'+policy, JavaExec) {
         dependsOn testClasses
         classpath=sourceSets.test.runtimeClasspath

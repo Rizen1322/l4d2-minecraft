@@ -18,6 +18,10 @@ class Actor {
     function GetClassname(){return userid<3?"player":"infected";}
     function GetHealth(){return health;}
     function TakeDamage(d,t,p){hits.append([d,p]);health-=d;}
+    function TakeDamageEx(inflictor,attacker,weapon,force,position,damage,type){
+        if(force.Length()<=0 || position==null || (type!=4 && type!=128))throw "Combat omitted native impact data";
+        TakeDamage(damage,type,attacker);
+    }
 }
 local host=Actor(1,0),peer=Actor(2,200),hostTarget=Actor(3,30),peerTarget=Actor(4,230);
 function GetListenServerHost(){return host;}

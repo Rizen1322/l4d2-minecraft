@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.0-alpha.1 — V2 transport, rendering and mobs (2026-10-12)
+
+- Separate latest avatar/mob snapshots from reliable edits and attacks; expire
+  stale samples instead of renewing their age on every retransmission.
+- Prioritize unassigned combat events while preserving numbered event order;
+  replace an old co-op connection only for the same authenticated session.
+- Interpolate remote player/entity rendering without changing authoritative
+  collision, snap genuine teleports, and stop restarting interpolation on duplicates.
+- Capture a wider guest world view without resizing windows; match frame FOV
+  metadata and local Steve sampling to reduce reprojection edge gaps.
+- Transfer bridged survivor glow to an original six-box Steve silhouette,
+  restoring Source glow and removing the proxy when the bridge stops.
+- Play shield contact/exhaustion sounds once; use native slash/club damage with
+  hit position and impulse for infected reactions.
+- Keep validated routes while refreshing, resume at current route progress and
+  wait for a route before classifying a mob's target as unreachable.
+- Add ground-mob wandering, hostile brain target memories and small-obstacle
+  jumping; allow specials/Tanks to pursue registered Minecraft mobs.
+- Bound native mob targets to 16 and report the nearest 64 guest mobs. Flying,
+  aquatic and boss-specific behavior remains incomplete; see docs/V2.md.
+
+
 ## 0.3.1-alpha.1 — bilingual companion (2026-10-12)
 
 - Switch the companion interface between Russian and English without restarting.

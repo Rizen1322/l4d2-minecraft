@@ -52,6 +52,33 @@ L4D2MCBridge.HideSurvivor <- function(player) {
     Hide(player);
     if(!NetProps.HasProp(player,"m_nRenderMode") || !NetProps.HasProp(player,"m_clrRender"))return;
     local saved=gameplay.hidden[player.GetEntityIndex()];
+    // Replace only a bridged survivor's original outline. A native, non-solid
+    // six-box proxy follows Source directly, so its aura works behind map walls.
+    if(NetProps.HasProp(player,"m_Glow.m_iGlowType") && "SpawnEntityFromTable" in getroottable()) {
+        local kind=NetProps.GetPropInt(player,"m_Glow.m_iGlowType");
+        if(!("aura" in saved) || saved.aura==null || !saved.aura.IsValid()) {
+            local aura=SpawnEntityFromTable("prop_dynamic_override",{model="models/l4d2mc/steve_aura.mdl",solid=0,rendermode=1,renderamt=0,disableshadows=1});
+            if(aura!=null && aura.IsValid() && NetProps.HasProp(aura,"m_Glow.m_iGlowType")) {
+                saved.aura<-aura;saved.glowType<-kind;
+                aura.SetOrigin(player.GetOrigin());
+            }else if(aura!=null && aura.IsValid())aura.Kill();
+        }
+        if("aura" in saved && saved.aura!=null && saved.aura.IsValid()) {
+            if(kind!=0)saved.glowType=kind;
+            NetProps.SetPropInt(player,"m_Glow.m_iGlowType",0);
+            if(NetProps.HasProp(player,"m_bSurvivorGlowEnabled")) {
+                if(!("survivorGlow" in saved))saved.survivorGlow<-NetProps.GetPropInt(player,"m_bSurvivorGlowEnabled");
+                NetProps.SetPropInt(player,"m_bSurvivorGlowEnabled",0);
+            }
+            saved.aura.SetOrigin(player.GetOrigin());saved.aura.SetAngles(player.GetAngles());
+            NetProps.SetPropInt(saved.aura,"m_Glow.m_iGlowType",saved.glowType>0?saved.glowType:3);
+            foreach(prop in ["m_Glow.m_glowColorOverride","m_Glow.m_bFlashing"])
+                if(NetProps.HasProp(player,prop) && NetProps.HasProp(saved.aura,prop))NetProps.SetPropInt(saved.aura,prop,NetProps.GetPropInt(player,prop));
+            if(NetProps.HasProp(saved.aura,"m_Glow.m_nGlowRangeMin"))NetProps.SetPropInt(saved.aura,"m_Glow.m_nGlowRangeMin",96);
+            if(NetProps.HasProp(saved.aura,"m_Glow.m_nGlowRange"))NetProps.SetPropInt(saved.aura,"m_Glow.m_nGlowRange",3000);
+            if(saved.glowType==0 && NetProps.HasProp(saved.aura,"m_Glow.m_glowColorOverride"))NetProps.SetPropInt(saved.aura,"m_Glow.m_glowColorOverride",player.GetHealth()<25?0x4040FF:0xFFCC44);
+        }
+    }
     local mode=NetProps.GetPropInt(player,"m_nRenderMode"),color=NetProps.GetPropInt(player,"m_clrRender");
     if(!(mode==1 && (color&0xFF000000)==0)) {
         saved.renderMode<-mode;
@@ -63,7 +90,10 @@ L4D2MCBridge.HideSurvivor <- function(player) {
 L4D2MCBridge.RestoreHidden <- function(id) {
     if(!(id in gameplay.hidden))return;
     local saved=gameplay.hidden[id],e=saved.entity;
+    if("aura" in saved && saved.aura!=null && saved.aura.IsValid())saved.aura.Kill();
     if(e.IsValid()) {
+        if("survivorGlow" in saved && NetProps.HasProp(e,"m_bSurvivorGlowEnabled") && NetProps.GetPropInt(e,"m_bSurvivorGlowEnabled")==0)NetProps.SetPropInt(e,"m_bSurvivorGlowEnabled",saved.survivorGlow);
+        if("glowType" in saved && NetProps.HasProp(e,"m_Glow.m_iGlowType") && NetProps.GetPropInt(e,"m_Glow.m_iGlowType")==0)NetProps.SetPropInt(e,"m_Glow.m_iGlowType",saved.glowType);
         // old==null: render-colour-only record (predicted viewmodel); never write its flags.
         if(saved.old!=null) {
             local flags=NetProps.GetPropInt(e,"m_fEffects");
@@ -264,6 +294,19 @@ L4D2MCBridge.ActorAlive <- function(e) {
 L4D2MCBridge.IsCombatTarget <- function(e) {
     return e!=null && e.IsValid() && (e.GetClassname()=="infected" || e.GetClassname()=="witch" || e.GetClassname()=="player");
 };
+L4D2MCBridge.CombatDamage <- function(target,amount,attacker,origin,blade=false) {
+    if(!ActorAlive(target) || amount<=0)return false;
+    local at=target.GetOrigin()+Vector(0,0,32),delta=at-origin,length=delta.Length();
+    delta.z=0;length=delta.Length();
+    local force=length>0.01?delta*(1.0/length):Vector(1,0,0);
+    // Native force/hit position let Source drive blood, pain, dismemberment and
+    // ragdolls. Do not SetHealth/Kill or spawn one particle entity per hit.
+    force=force*((amount<300?amount:300)*18)+Vector(0,0,200);
+    local before=target.GetHealth();
+    if("TakeDamageEx" in target)target.TakeDamageEx(attacker,attacker,null,force,at,amount,blade?4:128);
+    else target.TakeDamage(amount,blade?4:128,attacker);
+    return !target.IsValid() || target.GetHealth()<before;
+};
 L4D2MCBridge.Raycast <- function(start,end,ignore) {
     local trace={start=start,end=end,ignore=ignore,mask=1174421507}; // MASK_SHOT, world + hitboxes.
     TraceLine(trace);return trace;
@@ -422,8 +465,7 @@ L4D2MCBridge.Event <- function(fields,player) {
             if(e==player || (e.GetClassname()=="player" && e.IsSurvivor()))continue;
             if(!ActorAlive(e))continue;
             local hit=tier>0 && e.GetClassname()=="infected"?e.GetHealth()+1.0:damage;
-            e.TakeDamage(hit,128,player);
-            hits++;
+            if(CombatDamage(e,hit,player,p,blade))hits++;
         }
         if(hits>0 && "Reply" in this)Reply(format("\"t\":\"attacksound\",\"kind\":\"%s\"",blade && hits>1?"sweep":damage>=60?"strong":"weak"));
     } else if(kind=="mobhit" && (fields.len()==9 || fields.len()==10)) {
@@ -438,7 +480,7 @@ L4D2MCBridge.Event <- function(fields,player) {
             local attacker=Integer(fields[8]),ignore=attacker in gameplay.physics?gameplay.physics[attacker].proxy:null;
             local trace=Raycast(from+Vector(0,0,24),target.GetOrigin()+Vector(0,0,32),ignore);
             if(!("hit" in trace) || !trace.hit || ("enthit" in trace && trace.enthit==target)) {
-                target.TakeDamage(damage,128,null);
+                CombatDamage(target,damage,null,from,false);
                 printl("[L4D2MC COMBAT] mobhit actor="+id+" damage="+damage);
             }
         }

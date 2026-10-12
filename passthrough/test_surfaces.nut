@@ -40,7 +40,13 @@ b.NavRequest(["nav","1","1","0","0","0","200","0","0","44","90"],player);
 b.NavTick();
 if(answer==null || answer.find("200")!=null || answer.find("6.2500")==null)throw "Connected floor nav failed";
 class Enemy {id=0;constructor(i){id=i;}function GetEntityIndex(){return id;}function GetClassname(){return "infected";}}
+local shieldSounds=[];b.Reply=function(value){shieldSounds.append(value);return true;};
+local repeated=Enemy(999);b.ShieldSpend(repeated);b.ShieldSpend(repeated);
+if(shieldSounds.len()!=1 || shieldSounds[0].find("shieldblock")==null)throw "Repeated shield contact duplicated block sound";
+b.survival.shieldCharge=6;b.survival.shieldHitAt.clear();shieldSounds.clear();
 for(local i=0;i<6;i++)if(!b.ShieldSpend(Enemy(i+1)))throw "Shield capacity too small";
+local blocks=0,breaks=0;foreach(value in shieldSounds){if(value.find("shieldblock")!=null)blocks++;if(value.find("shielddisable")!=null)breaks++;}
+if(blocks!=6 || breaks!=1)throw "Shield sound/cooldown count incorrect";
 if(b.ShieldSpend(Enemy(7)) || b.ShieldAvailable())throw "Shield must enter cooldown";
 now=6;b.ShieldTick(player);
 if(!b.ShieldAvailable() || b.survival.shieldCharge!=6)throw "Shield did not recover";
