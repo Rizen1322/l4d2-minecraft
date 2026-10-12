@@ -2,6 +2,8 @@
 
 Small Windows WPF app for the mashup. Built with .NET Framework 4.8; the distributed EXE needs no .NET SDK. Windows 10/11 with .NET Framework 4.8 is the supported desktop environment.
 
+Use **RU / EN** in the sidebar to change the language instantly. The selection is saved for the next launch. Labels, app status and app-generated errors are translated; logs emitted by external tools remain in their original language.
+
 ![Companion overview](../docs/assets/companion.png)
 
 ## What the buttons do

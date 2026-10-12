@@ -52,7 +52,7 @@ Use your own copies of both games and your normal Minecraft launcher. Install th
 
 ### First setup
 
-**Desktop app:** download **L4D2MC-Companion.exe** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases). It finds installed games, downloads and checks the project, prepares build tools, installs the mod and saves host/join settings. Requires Windows 10/11 with .NET Framework 4.8. Minecraft is still started with your own launcher. [App details and build instructions](companion/README.md).
+**Desktop app:** download **L4D2MC-Companion.exe** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases). It finds installed games, downloads and checks the project, prepares build tools, installs the mod and saves host/join settings. Switch **RU / EN** in the sidebar; the app remembers your language. Requires Windows 10/11 with .NET Framework 4.8. Minecraft is still started with your own launcher. [App details and build instructions](companion/README.md).
 
 Sword hits on Source infected now play Minecraft attack sounds. Successful hits are confirmed by Source; duplicate network deliveries do not replay the hit sound. Audio comes from your installed Minecraft and follows its sound settings.
 

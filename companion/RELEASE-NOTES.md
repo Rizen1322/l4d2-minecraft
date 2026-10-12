@@ -1,4 +1,8 @@
-# 0.3.0 Alpha — Desktop Companion & Combat Audio
+# 0.3.1 Alpha — Russian / English Companion
+
+Switch **RU / EN** in the sidebar without restarting. Your selection is saved for the next launch. All app labels, status messages, invitations and app-generated errors support both languages. External tool logs retain their original text.
+
+This patch adds translation round-trip tests, dynamic message checks and backward compatibility for existing settings. Both WPF languages were rendered and checked, including the setup and co-op pages.
 
 Download **L4D2MC-Companion.exe** below. Run it, open **Установка**, check the detected game folders and click **Установить мод**. The app downloads this release's source archive and official build tools. Install L4D2 Authoring Tools through its Steam button if needed. Both games must be closed during installation.
 

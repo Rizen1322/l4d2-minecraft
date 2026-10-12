@@ -51,11 +51,11 @@ namespace L4D2MC.Companion {
                 var args=new List<string>{"c++","-target","x86-windows-gnu","-O2","-static","-x","c++","-I",Path.Combine(squirrel,"include"),Path.Combine(squirrel,"sq","sq.c")};
                 args.AddRange(Directory.GetFiles(Path.Combine(squirrel,"squirrel"),"*.cpp"));args.AddRange(Directory.GetFiles(Path.Combine(squirrel,"sqstdlib"),"*.cpp"));args.AddRange(new[]{"-o",sq});await Runner.Run(Path.Combine(zigRoot,"zig.exe"),args.ToArray());
             }
-            log("Python, Java, Zig, ReShade и Squirrel готовы.");
+            log(Localization.Text("Python, Java, Zig, ReShade и Squirrel готовы."));
         }
         public async Task Install() {
-            if(!Paths.Game(settings.Game)||!Paths.Minecraft(settings.Minecraft))throw new InvalidOperationException("Укажите папки L4D2 и Minecraft.");
-            if(!System.IO.File.Exists(Path.Combine(settings.Game,"bin","vpk.exe"))||!System.IO.File.Exists(Path.Combine(settings.Game,"bin","studiomdl.exe")))throw new InvalidOperationException("Сначала установите Left 4 Dead 2 Authoring Tools в Steam. Кнопка есть в разделе установки.");
+            if(!Paths.Game(settings.Game)||!Paths.Minecraft(settings.Minecraft))throw new InvalidOperationException(Localization.Text("Укажите папки L4D2 и Minecraft."));
+            if(!System.IO.File.Exists(Path.Combine(settings.Game,"bin","vpk.exe"))||!System.IO.File.Exists(Path.Combine(settings.Game,"bin","studiomdl.exe")))throw new InvalidOperationException(Localization.Text("Сначала установите Left 4 Dead 2 Authoring Tools в Steam. Кнопка есть в разделе установки."));
             await Prepare();
             await Runner.Run("powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",Path.Combine(Root,"Setup-L4D2MC.ps1"),"-Game",settings.Game,"-Minecraft",settings.Minecraft,"-JavaHome",Runner.JavaHome,"-ReShadeDll",Path.Combine(Tools,"ReShade32.dll"),"-Zig",Path.Combine(Tools,"zig-x86_64-windows-0.15.2","zig.exe"),"-ReShadeInclude",Path.Combine(Tools,"reshade-6.8.0","include"),"-Squirrel",Path.Combine(Tools,"squirrel-parser","sq-win32.exe"));
         }

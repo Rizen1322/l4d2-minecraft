@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1-alpha.1 — bilingual companion (2026-10-12)
+
+- Switch the companion interface between Russian and English without restarting.
+- Persist language selection, translate app messages and keep external tool logs intact.
+- Verify translation round trips, dynamic message suffixes and old settings compatibility.
+
 ## 0.3.0-alpha.1 — desktop companion and combat audio (2026-10-12)
 
 - Add a small Windows desktop EXE with game autodetection, verified source

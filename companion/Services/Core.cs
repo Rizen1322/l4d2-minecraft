@@ -18,6 +18,7 @@ namespace L4D2MC.Companion {
         public string Game {get;set;}="";
         public string Minecraft {get;set;}="";
         public string Player {get;set;}="";
+        public string Language {get;set;}="ru";
         public int Width {get;set;}=2560;
         public int Height {get;set;}=1440;
         public static string Data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"L4D2MC");
@@ -38,13 +39,13 @@ namespace L4D2MC.Companion {
         public static bool Minecraft(string p)=>!string.IsNullOrWhiteSpace(p)&&Directory.Exists(Path.Combine(p,"versions"));
         public static bool Project(string p)=>!string.IsNullOrWhiteSpace(p)&&File.Exists(Path.Combine(p,"Setup-L4D2MC.ps1"))&&File.Exists(Path.Combine(p,"passthrough","bridge.py"));
         public static string Child(string root,string relative) {
-            if(string.IsNullOrWhiteSpace(relative)||Path.IsPathRooted(relative)||relative.Contains(":"))throw new InvalidDataException("Небезопасный путь архива.");
+            if(string.IsNullOrWhiteSpace(relative)||Path.IsPathRooted(relative)||relative.Contains(":"))throw new InvalidDataException(Localization.Text("Небезопасный путь архива."));
             var basis=Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
-            if(Directory.Exists(root)&&(File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("Папка установки не должна быть ссылкой.");
+            if(Directory.Exists(root)&&(File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException(Localization.Text("Папка установки не должна быть ссылкой."));
             var value=Path.GetFullPath(Path.Combine(basis,relative));
-            if(!value.StartsWith(basis,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Архив пытается выйти за папку установки.");
+            if(!value.StartsWith(basis,StringComparison.OrdinalIgnoreCase))throw new InvalidDataException(Localization.Text("Архив пытается выйти за папку установки."));
             for(var p=Path.GetDirectoryName(value);p!=null&&p.StartsWith(basis,StringComparison.OrdinalIgnoreCase);p=Path.GetDirectoryName(p))
-                if(Directory.Exists(p)&&(File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("В папке установки обнаружена ссылка на другой каталог.");
+                if(Directory.Exists(p)&&(File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException(Localization.Text("В папке установки обнаружена ссылка на другой каталог."));
             return value;
         }
         public static string Hash(string path){using(var stream=File.OpenRead(path))using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
@@ -68,7 +69,7 @@ namespace L4D2MC.Companion {
     }
     public static class Room {
         public static string Create(string root,string ip) {
-            if(!IPAddress.TryParse(ip,out var address)||address.AddressFamily!=System.Net.Sockets.AddressFamily.InterNetwork)throw new ArgumentException("Выберите IPv4-адрес вашей LAN/VPN сети.");
+            if(!IPAddress.TryParse(ip,out var address)||address.AddressFamily!=System.Net.Sockets.AddressFamily.InterNetwork)throw new ArgumentException(Localization.Text("Выберите IPv4-адрес вашей LAN/VPN сети."));
             var path=Path.Combine(root,"l4d2mc.coop.json");string token=null;
             try{var old=Json.Object(File.ReadAllText(path));if((string)old["mode"]=="host"&&Regex.IsMatch((string)old["token"],"^[A-Za-z0-9_-]{32,128}$"))token=(string)old["token"];}catch{}
             if(token==null){var b=new byte[32];using(var random=RandomNumberGenerator.Create())random.GetBytes(b);token=Convert.ToBase64String(b).TrimEnd('=').Replace('+','-').Replace('/','_');}
@@ -76,14 +77,14 @@ namespace L4D2MC.Companion {
             return Convert.ToBase64String(Encoding.UTF8.GetBytes("L4D2MC1|"+ip+"|"+token));
         }
         public static void Join(string root,string invite,string player) {
-            player=(player??"").Trim();if(player.Length==0||player.Length>128||player.Any(char.IsControl))throw new ArgumentException("Введите собственный ник из L4D2.");
-            if((invite??"").Length>1024)throw new ArgumentException("Слишком длинное приглашение.");
-            string[] p;try{p=Encoding.UTF8.GetString(Convert.FromBase64String(invite.Trim())).Split('|');}catch{throw new ArgumentException("Не удалось прочитать код приглашения.");}
-            if(p.Length!=3||p[0]!="L4D2MC1"||!IPAddress.TryParse(p[1],out var ip)||ip.AddressFamily!=System.Net.Sockets.AddressFamily.InterNetwork||!Regex.IsMatch(p[2],"^[A-Za-z0-9_-]{32,128}$"))throw new ArgumentException("Некорректное приглашение.");
+            player=(player??"").Trim();if(player.Length==0||player.Length>128||player.Any(char.IsControl))throw new ArgumentException(Localization.Text("Введите собственный ник из L4D2."));
+            if((invite??"").Length>1024)throw new ArgumentException(Localization.Text("Слишком длинное приглашение."));
+            string[] p;try{p=Encoding.UTF8.GetString(Convert.FromBase64String(invite.Trim())).Split('|');}catch{throw new ArgumentException(Localization.Text("Не удалось прочитать код приглашения."));}
+            if(p.Length!=3||p[0]!="L4D2MC1"||!IPAddress.TryParse(p[1],out var ip)||ip.AddressFamily!=System.Net.Sockets.AddressFamily.InterNetwork||!Regex.IsMatch(p[2],"^[A-Za-z0-9_-]{32,128}$"))throw new ArgumentException(Localization.Text("Некорректное приглашение."));
             Json.Write(Path.Combine(root,"l4d2mc.coop.json"),new{mode="join",server="ws://"+p[1]+":25602",l4d2server=p[1]+":27015",player,token=p[2]});
         }
         public static void Off(string root){var p=Path.Combine(root,"l4d2mc.coop.json");if(File.Exists(p))File.Delete(p);}
-        public static string Describe(string root){try{var c=Json.Object(File.ReadAllText(Path.Combine(root,"l4d2mc.coop.json")));return (string)c["mode"]=="host"?"Хост комнаты":"Гость • "+c["player"];}catch{return "Одиночная игра";}}
+        public static string Describe(string root){try{var c=Json.Object(File.ReadAllText(Path.Combine(root,"l4d2mc.coop.json")));return (string)c["mode"]=="host"?Localization.Text("Хост комнаты"):Localization.Text("Гость • ")+c["player"];}catch{return Localization.Text("Одиночная игра");}}
     }
     public sealed class Runner {
         readonly string root;readonly Action<string> log;public string PythonDir;public string JavaHome;
@@ -108,7 +109,7 @@ namespace L4D2MC.Companion {
         public Task Run(string exe,params string[] args)=>Task.Run(()=>{
             using(var p=new Process{StartInfo=Start(exe,args)}){
                 p.OutputDataReceived+=(s,e)=>{if(e.Data!=null)log(e.Data);};p.ErrorDataReceived+=(s,e)=>{if(e.Data!=null)log(e.Data);};
-                p.Start();p.BeginOutputReadLine();p.BeginErrorReadLine();p.WaitForExit();if(p.ExitCode!=0)throw new InvalidOperationException("Шаг завершился с ошибкой "+p.ExitCode+". Подробности — в журнале.");
+                p.Start();p.BeginOutputReadLine();p.BeginErrorReadLine();p.WaitForExit();if(p.ExitCode!=0)throw new InvalidOperationException(Localization.Text("Шаг завершился с ошибкой ")+p.ExitCode+Localization.Text(". Подробности — в журнале."));
             }
         });
     }
