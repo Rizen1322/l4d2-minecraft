@@ -34,6 +34,9 @@ abstract class GameRendererMixin {
 		FrameExporter.captureWorld(this.mainRenderTarget);
 	}
 
+    @Inject(method="render3dHud",at=@At("TAIL"))
+    private void passthrough$captureHands(final CallbackInfo ci){FrameExporter.captureHands(this.mainRenderTarget);}
+
 	@Inject(method = "render", at = @At("TAIL"))
 	private void passthrough$captureOverlay(final CallbackInfo ci) {
 		FrameExporter.captureOverlay(this.mainRenderTarget);

@@ -10,26 +10,43 @@ using System.Threading.Tasks;
 
 namespace L4D2MC.Companion {
     public sealed class Downloads {
-        readonly HttpClient http=new HttpClient{Timeout=TimeSpan.FromMinutes(30)};
+        readonly HttpClient http;
         readonly Action<string> log;readonly Action<double> progress;readonly string cache;
-        public Downloads(string cache,Action<string> log,Action<double> progress){this.cache=cache;this.log=log;this.progress=progress;Directory.CreateDirectory(cache);http.DefaultRequestHeaders.UserAgent.ParseAdd("L4D2MC-Companion/0.3.0");}
+        public Downloads(string cache,Action<string> log,Action<double> progress,HttpMessageHandler handler=null){http=handler==null?new HttpClient():new HttpClient(handler);http.Timeout=TimeSpan.FromMinutes(30);this.cache=cache;this.log=log;this.progress=progress;Directory.CreateDirectory(cache);http.DefaultRequestHeaders.UserAgent.ParseAdd("L4D2MC-Companion/2.0.1");}
         public static Dictionary<string,object> Obj(object value)=>(Dictionary<string,object>)value;
         public static IEnumerable<object> Arr(object value)=>((IEnumerable)value).Cast<object>();
-        public async Task<object> Api(string url){using(var response=await http.GetAsync(url)){response.EnsureSuccessStatusCode();return Json.Decode<object>(await response.Content.ReadAsStringAsync());}}
+        async Task<HttpResponseMessage> Response(string url){
+            for(int attempt=0;;attempt++){
+                HttpResponseMessage response;
+                try{response=await http.GetAsync(url,HttpCompletionOption.ResponseHeadersRead);}
+                catch(HttpRequestException)when(attempt<2){await Task.Delay(500*(attempt+1));continue;}
+                catch(TaskCanceledException)when(attempt<2){await Task.Delay(500*(attempt+1));continue;}
+                int status=(int)response.StatusCode;
+                if(attempt<2&&(status==429||status==500||status==502||status==503||status==504)){response.Dispose();await Task.Delay(500*(attempt+1));continue;}
+                try{response.EnsureSuccessStatusCode();return response;}catch{response.Dispose();throw;}
+            }
+        }
+        public async Task<object> Api(string url){using(var response=await Response(url)){return Json.Decode<object>(await response.Content.ReadAsStringAsync());}}
         public async Task<string> File(string url,string name,string expected=null) {
             var target=Paths.Child(cache,name);
+            if(expected!=null&&!Regex.IsMatch(expected,"^[a-fA-F0-9]{64}$"))throw new InvalidDataException(Localization.Text("Неверный файл контрольной суммы релиза."));
             if(System.IO.File.Exists(target)&&expected!=null&&Paths.Hash(target)==expected.ToLowerInvariant())return target;
             log(Localization.Text("Скачивание: ")+name);var temporary=target+".part";
-            using(var response=await http.GetAsync(url,HttpCompletionOption.ResponseHeadersRead)) {
+            try{
+            for(int attempt=0;;attempt++)try{using(var response=await Response(url)) {
                 response.EnsureSuccessStatusCode();var length=response.Content.Headers.ContentLength??0;
                 using(var input=await response.Content.ReadAsStreamAsync())using(var output=new FileStream(temporary,FileMode.Create,FileAccess.Write,FileShare.None,81920,true)){
                     var buffer=new byte[81920];long total=0;int count;var last=DateTime.MinValue;
                     while((count=await input.ReadAsync(buffer,0,buffer.Length))>0){await output.WriteAsync(buffer,0,count);total+=count;if((DateTime.UtcNow-last).TotalMilliseconds>150){progress(length>0?100.0*total/length:0);last=DateTime.UtcNow;}}
                     if(length>0&&total!=length)throw new IOException(Localization.Text("Скачивание оборвалось. Повторите попытку."));
                 }
-            }
+            }break;}
+            catch(IOException)when(attempt<2){await Task.Delay(500*(attempt+1));}
+            catch(HttpRequestException)when(attempt<2){await Task.Delay(500*(attempt+1));}
+            catch(TaskCanceledException)when(attempt<2){await Task.Delay(500*(attempt+1));}
             if(expected!=null&&(!Regex.IsMatch(expected,"^[a-fA-F0-9]{64}$")||Paths.Hash(temporary)!=expected.ToLowerInvariant()))throw new InvalidDataException(Localization.Text("Контрольная сумма не совпадает: ")+name);
-            if(System.IO.File.Exists(target))System.IO.File.Delete(target);System.IO.File.Move(temporary,target);progress(100);return target;
+            if(System.IO.File.Exists(target))System.IO.File.Replace(temporary,target,null);else System.IO.File.Move(temporary,target);progress(100);return target;
+            }finally{if(System.IO.File.Exists(temporary))System.IO.File.Delete(temporary);}
         }
         public static void Extract(string archive,string destination) {
             Directory.CreateDirectory(destination);long bytes=0;int count=0;
@@ -48,7 +65,9 @@ namespace L4D2MC.Companion {
             if(source==null||checksum==null)throw new InvalidDataException(Localization.Text("На GitHub пока нет исходников с контрольной суммой."));
             log(Localization.Text("Версия проекта: ")+tag);
             var checksumFile=await File((string)checksum["browser_download_url"],"source.sha256");
-            var sha=System.IO.File.ReadAllText(checksumFile).Split(new[]{' ','\r','\n','\t'},StringSplitOptions.RemoveEmptyEntries)[0];
+            var tokens=System.IO.File.ReadAllText(checksumFile).Split(new[]{' ','\r','\n','\t'},StringSplitOptions.RemoveEmptyEntries);
+            if(tokens.Length==0||!Regex.IsMatch(tokens[0],"^[a-fA-F0-9]{64}$"))throw new InvalidDataException(Localization.Text("Неверный файл контрольной суммы релиза."));
+            var sha=tokens[0];
             var archive=await File((string)source["browser_download_url"],"source.zip",sha);
             var staging=Path.Combine(cache,"source-"+Guid.NewGuid().ToString("N"));Extract(archive,staging);
             var payload=Path.Combine(staging,"l4d2-minecraft");var manifest=Json.Object(System.IO.File.ReadAllText(Path.Combine(payload,"SOURCE-MANIFEST.json")));

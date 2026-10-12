@@ -173,6 +173,15 @@ class CoopLink:
                 name=event.get(key,'minecraft:air')
                 if not isinstance(name,str) or not re.fullmatch(r'[a-z0-9_.-]+:[a-z0-9_/.-]{1,96}',name):raise ValueError('Invalid equipment ID')
                 values[key]=name
+            swing=event.get('swing',0)
+            if type(swing) is not int or not 0<=swing<2**31:raise ValueError('Invalid swing sequence')
+            using=event.get('using',False)
+            if type(using) is not bool:raise ValueError('Invalid use state')
+            for key in ('swinghand','usehand'):
+                hand=event.get(key,'main')
+                if hand not in ('main','off'):raise ValueError('Invalid animation hand')
+                values[key]=hand
+            values.update(swing=swing,using=using)
             self.metadata[userid]=(values,time.monotonic());return
         rows=valid_rows(event.get('rows'));updated=dict(self.ledger);applied=[]
         for row in rows:
@@ -235,6 +244,7 @@ class CoopLink:
                  'yaw':-float(angles[0])-90,'pitch':float(angles[1]),'hp':p.get('health',[100])[0],
                  'dead':bool(p.get('dead',False)),'incap':bool(p.get('incap',False)), 'pin':p.get('pin','none'),
                  'crouching':bool(p.get('buttons',0)&(4|131072)), 'flying':bool(p.get('flying',False)),
+                 'burning':bool(p.get('burning',False)),
                  'main':'minecraft:air','off':'minecraft:air','chest':'minecraft:air',**meta}
             rows.append(row)
         return {'t':'peers','scene':self.scene,'players':rows[:MAX_PLAYERS]}

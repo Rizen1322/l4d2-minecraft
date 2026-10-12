@@ -111,10 +111,12 @@ Entities.Next<-function(previous){return null;};
 b.Raycast=function(start,end,ignore){return {hit=false};};hits.clear();
 b.FireZone(["fire","0","0","0"],player);b.FireTick(player);
 if(ignitions.len()!=2 || ignitions[0][1]!="IgniteLifetime" || hits.len()!=0)throw "Fire contact failed native ignite or doubled initial damage";
+if(!b.ContactBurning(targets[1]))throw "Friendly Source fire did not export Minecraft burning state";
 now=6.4;b.FireTick(player);
 if(hits.len()!=2 || hits[0][1]+hits[1][1]!=12)throw "Missing native flame did not receive fallback burn damage";
 b.survival.fireZones.clear();now=11;b.FireTick(player);
 if(b.survival.fireActors.len()!=0)throw "Fire contact continued after expiration";
+if(b.ContactBurning(targets[1]))throw "Expired teammate burning state retained";
 class RescuePlayer {
     hp=0;dead=false;incap=true;revives=0;fail=false;pos=null;velocity=null;baseVelocity=null;fallVelocity=0;motionResets=0;
     constructor(){pos=Vec(0,0,0);velocity=Vec(0,0,0);baseVelocity=Vec(0,0,0);}

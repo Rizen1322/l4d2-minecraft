@@ -75,6 +75,10 @@ public final class PlayerSync {
 		player.setXRot(headPitch);
 		player.yRotO = headYaw;
 		player.xRotO = headPitch;
+        // Vanilla arm lag uses tick-smoothed bob angles. Source turns arrive
+        // between ticks, so that lag can swing both hands across the screen.
+        player.xBob = player.xBobO = headPitch;
+        player.yBob = player.yBobO = headYaw;
 		player.yHeadRot = player.yHeadRotO = headYaw;
 		player.yBodyRot = player.yBodyRotO = dev.rehan.passthrough.AvatarPosePolicy.bodyYaw(p.firstPerson(),p.yaw(),p.lookYaw());
 		// the model stands exactly where the host's player is this frame (not a tick behind, interpolating)

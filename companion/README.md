@@ -8,9 +8,9 @@ Use **RU / EN** in the sidebar to change the language instantly. The selection i
 
 ## What the buttons do
 
-- **Установка**: detects Steam libraries and Legacy/standard Minecraft directories, downloads a GitHub source release, verifies its SHA-256 and file manifest, prepares private toolchains, runs the existing game installer.
+- **Setup → Update and install**: detects Steam libraries and Minecraft directories, downloads the newest source release even when a project exists, checks its SHA-256 and manifest, prepares tools and installs the mod. Both games must be closed.
 - **Кооператив**: creates an invitation for your LAN/VPN address or joins an invitation using **your own** L4D2 name. Tokens stay in the existing local co-op config; they are never sent as process arguments.
-- **Играть**: opens the Minecraft folder/Legacy Launcher, then starts the existing Source/bridge launcher with a selected borderless resolution. Minecraft still starts through your normal signed-in launcher.
+- **Play**: opens the Minecraft folder/Legacy Launcher, then starts the Source/bridge launcher with a selected map and borderless resolution. Minecraft starts through your normal signed-in launcher. Joining uses the invitation's server instead of the map field.
 - **Журнал**: streamed build and startup output. The log is `%LOCALAPPDATA%\L4D2MC\companion.log`.
 
 Install/update with both games closed. The source update preserves private game data, backups and room settings, but replaces project source files. Developers should use a separate checkout if they have local code changes. Authoring Tools are installed through Steam, using the app's dedicated button.

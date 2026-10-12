@@ -19,12 +19,14 @@ namespace L4D2MC.Companion {
         public string Minecraft {get;set;}="";
         public string Player {get;set;}="";
         public string Language {get;set;}="ru";
+        public string Map {get;set;}="c1m1_hotel";
         public int Width {get;set;}=2560;
         public int Height {get;set;}=1440;
         public static string Data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"L4D2MC");
         public static Settings Load() {
-            try{return Json.Decode<Settings>(File.ReadAllText(Path.Combine(Data,"companion.json")))??new Settings();}catch{return new Settings();}
+            try{var s=Json.Decode<Settings>(File.ReadAllText(Path.Combine(Data,"companion.json")))??new Settings();s.Project=s.Project??"";s.Game=s.Game??"";s.Minecraft=s.Minecraft??"";s.Player=s.Player??"";s.Language=s.Language=="en"?"en":"ru";if(s.Width<320||s.Width>3840)s.Width=2560;if(s.Height<240||s.Height>2160)s.Height=1440;if(!ValidMap(s.Map))s.Map="c1m1_hotel";return s;}catch{return new Settings();}
         }
+        public static bool ValidMap(string map)=>map!=null&&Regex.IsMatch(map,"^[A-Za-z0-9_]{1,64}$");
         public void Save(){Directory.CreateDirectory(Data);Json.Write(Path.Combine(Data,"companion.json"),this);}
     }
     public static class Json {
@@ -50,10 +52,10 @@ namespace L4D2MC.Companion {
         }
         public static string Hash(string path){using(var stream=File.OpenRead(path))using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
         public static void Detect(Settings s) {
-            if(!Project(s.Project)) {
+            if(string.IsNullOrWhiteSpace(s.Project)) {
                 var d=new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
                 for(int i=0;d!=null&&i<7;i++,d=d.Parent)if(Project(d.FullName)){s.Project=d.FullName;break;}
-                if(!Project(s.Project))s.Project=Path.Combine(Settings.Data,"project");
+                if(string.IsNullOrWhiteSpace(s.Project))s.Project=Path.Combine(Settings.Data,"project");
             }
             if(Project(s.Project))try{var local=Json.Object(File.ReadAllText(Path.Combine(s.Project,"l4d2mc.local.json")));if(local.ContainsKey("game")&&Game((string)local["game"]))s.Game=(string)local["game"];if(local.ContainsKey("minecraft")&&Minecraft((string)local["minecraft"]))s.Minecraft=(string)local["minecraft"];}catch{}
             if(!Game(s.Game)) {

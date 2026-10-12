@@ -338,7 +338,7 @@ class FrameHeartbeat:
         magic, version = struct.unpack_from('<II',header)
         counter = struct.unpack_from('<q',header,32)[0]
         slot = struct.unpack_from('<i',header,40)[0]
-        if magic != 0x5450434D or version != 1 or counter < 1 or slot not in (0,1,2):
+        if magic != 0x5450434D or version not in (1,2) or counter < 1 or slot not in (0,1,2):
             return False
         if counter != self.counter:
             self.counter, self.changed = counter, now
@@ -582,12 +582,12 @@ class HostInput:
         finally:reader.close()
 
     def _send(self,arguments):
-        # -hijack starts a new game if the old one has already gone away.
-        # Cleanup must never relaunch it. Keep even a race fallback insecure.
+        # Control an existing add-on only. Cleanup must never start a game or
+        # repeatedly initialize Steam through a helper game executable.
         if not self._window() or not self._engine_ready():return False
-        subprocess.Popen([str(self.exe),'-insecure','-hijack',*arguments],
-            creationflags=subprocess.CREATE_NO_WINDOW,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        return True
+        if len(arguments)!=2 or arguments[0]!='+exec' or not re.fullmatch(r'l4d2mc_[A-Za-z0-9_]{1,89}',arguments[1]):return False
+        from source_commands import send_config
+        return send_config(self._window(),arguments[1])
 
     def set_gui(self, open):
         if self.disabled == open:

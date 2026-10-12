@@ -57,7 +57,7 @@ public final class HostState {
             try{var row=value.getAsJsonObject();members.add(new dev.rehan.passthrough.PeerRoster.Member(
                 row.get("id").getAsInt(),row.get("x").getAsDouble(),row.get("y").getAsDouble(),row.get("z").getAsDouble(),
                 row.get("yaw").getAsFloat(),row.get("pitch").getAsFloat(),row.get("hp").getAsFloat(),row.get("incap").getAsBoolean(),row.get("dead").getAsBoolean(),
-                row.get("pin").getAsString(),row.get("main").getAsString(),row.get("off").getAsString(),row.get("flying").getAsBoolean(),row.has("crouching") && row.get("crouching").getAsBoolean()));}catch(RuntimeException ignored){}
+                row.get("pin").getAsString(),row.get("main").getAsString(),row.get("off").getAsString(),row.get("flying").getAsBoolean(),row.has("crouching") && row.get("crouching").getAsBoolean(),row.has("swing")?row.get("swing").getAsInt():-1,row.has("swinghand")?row.get("swinghand").getAsString():"main",row.has("using") && row.get("using").getAsBoolean(),row.has("usehand")?row.get("usehand").getAsString():"main",row.has("burning") && row.get("burning").getAsBoolean()));}catch(RuntimeException ignored){}
         }
         peerRoster=new dev.rehan.passthrough.PeerRoster(message.get("scene").getAsLong(),System.nanoTime(),members);
     }

@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <atomic>
 #include <cstdint>
+#include "source_commands.h"
 
 // A thread-local post-window-message hook: never subclass Source or swallow
 // messages. SetCursor in Present can be overwritten by the next WM_SETCURSOR.
@@ -19,6 +20,7 @@ inline LRESULT CALLBACK after_message(int code,WPARAM wp,LPARAM lp) {
     const LRESULT result=CallNextHookEx(nullptr,code,wp,lp);
     if(code<0 || !lp)return result;
     const auto& message=*reinterpret_cast<const CWPRETSTRUCT*>(lp);
+    if(message.hwnd==window.load())source_commands::handle(message);
     if(message.hwnd!=window.load() || GetForegroundWindow()!=message.hwnd)return result;
     const auto now=GetTickCount64(),stamp=updated.load();
     const bool fresh=now>=stamp && now-stamp<1000;
@@ -33,6 +35,7 @@ inline LRESULT CALLBACK after_message(int code,WPARAM wp,LPARAM lp) {
     return result;
 }
 inline void remove() {
+    if(window.load()){RemovePropW(window.load(),source_commands::ready);RemovePropW(window.load(),source_commands::receipt);}
     hide=false;updated=0;wheelAllow=nullptr;
     if(hook){UnhookWindowsHookEx(hook);hook=nullptr;}
     window=nullptr;
@@ -50,6 +53,7 @@ inline bool publish(HWND hwnd,bool hidden,bool (*verified)(),bool (*wheelVerifie
         allow=verified;window=hwnd;
         hook=SetWindowsHookExW(WH_CALLWNDPROCRET,after_message,nullptr,thread);
         if(!hook){window=nullptr;return false;}
+        SetPropW(hwnd,source_commands::ready,reinterpret_cast<HANDLE>(1));
     }
     wheelAllow=wheelVerified?wheelVerified:verified;
     hide=hidden;updated=GetTickCount64();return true;

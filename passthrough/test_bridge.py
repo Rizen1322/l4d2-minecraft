@@ -7,6 +7,32 @@ from bridge import CollisionSnapshot, camera, position, surface, render_camera, 
 
 
 class SessionTests(unittest.TestCase):
+    def test_live_host_control_uses_existing_addon_without_a_game_process(self):
+        from unittest.mock import patch
+        host=HostInput(Path('absent-source'))
+        with patch.object(host,'_window',return_value=123),patch.object(host,'_engine_ready',return_value=True),patch('source_commands.send_config',return_value=True) as send,patch('bridge.subprocess.Popen') as launch:
+            self.assertTrue(host._send(['+exec','l4d2mc_view']))
+            send.assert_called_once_with(123,'l4d2mc_view');launch.assert_not_called()
+            self.assertFalse(host._send(['+exec','other_mod']))
+            self.assertFalse(host._send(['+exec','l4d2mc_view;quit']))
+    def test_frame_heartbeat_accepts_both_layer_protocols_and_expires_stalled_frames(self):
+        import struct
+        from bridge import FrameHeartbeat
+        from unittest.mock import patch
+        heartbeat=FrameHeartbeat.__new__(FrameHeartbeat)
+        heartbeat.view=1;heartbeat.counter=None;heartbeat.changed=-100
+        def header(version,counter,slot=0):
+            data=bytearray(48)
+            struct.pack_into('<II',data,0,0x5450434D,version)
+            struct.pack_into('<q',data,32,counter);struct.pack_into('<i',data,40,slot)
+            return bytes(data)
+        with patch('bridge.ctypes.string_at') as memory,patch('bridge.time.monotonic') as now:
+            memory.return_value=header(1,1);now.return_value=10;self.assertTrue(heartbeat.fresh())
+            now.return_value=11;self.assertFalse(heartbeat.fresh())
+            memory.return_value=header(2,2);self.assertTrue(heartbeat.fresh())
+            memory.return_value=header(9,3);self.assertFalse(heartbeat.fresh())
+            memory.return_value=header(2,3,9);self.assertFalse(heartbeat.fresh())
+            memory.return_value=header(2,3);self.assertTrue(heartbeat.fresh())
     def test_room_delivery_retains_successfully_sent_events_until_minecraft_ack(self):
         import asyncio
         from collections import deque

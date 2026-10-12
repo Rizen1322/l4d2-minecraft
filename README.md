@@ -54,9 +54,18 @@ Use your own copies of both games and your normal Minecraft launcher. Install th
 
 ### First setup
 
-**Desktop app:** download **L4D2MC-Companion.exe** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases). It finds installed games, downloads and checks the project, prepares build tools, installs the mod and saves host/join settings. Switch **RU / EN** in the sidebar; the app remembers your language. Requires Windows 10/11 with .NET Framework 4.8. Minecraft is still started with your own launcher. [App details and build instructions](companion/README.md).
+1. Download **L4D2MC-Companion.exe** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases). Requires Windows 10/11 with .NET Framework 4.8.
+2. Open **Setup**. Check the detected game folders and choose a permanent project folder. Install the official Authoring Tools with the Steam button if needed.
+3. Close both games and click **Update and install**. The app downloads the latest source release, verifies it, prepares tools and builds your private mod assets locally.
+4. Launch **L4D2MC-Fabric-26.3** through your normal Minecraft launcher.
+5. Open **Play**, choose a map and resolution, then click **Start the mashup**. Leave the app open until L4D2 closes.
+
+Switch **RU / EN** in the sidebar; the selection is remembered. Use **Co-op** to host a room or join an invitation with your own L4D2 nickname. [Detailed installation](docs/INSTALL.md) · [App details](companion/README.md).
 
 Sword hits on Source infected play Minecraft attack sounds. Shield contacts and exhausted shield capacity play block/break sounds. Successful contacts are confirmed by Source; duplicate network deliveries do not replay the sound. Audio comes from your installed Minecraft and follows its sound settings.
+
+<details>
+<summary><b>Manual setup for developers</b></summary>
 
 1. Download the **source ZIP** from [Releases](https://github.com/Rizen1322/l4d2-minecraft/releases), or clone the repository. Extract it into a permanent folder.
 2. Install the tools above. [INSTALL.md](docs/INSTALL.md) has the tool links and explicit paths.
@@ -88,7 +97,11 @@ The release contains project source, scripts, the Gradle wrapper and labelled RE
 
 </details>
 
+</details>
+
 ### Resolution and map
+
+Choose these on Companion's **Play** page. The equivalent command for a manual checkout is shown below.
 
 The 2K launcher uses **2560 × 1440, borderless windowed**. For another resolution/map:
 
@@ -100,7 +113,9 @@ Steam library detection is automatic after setup. Overrides: `-Game`, `L4D2MC_GA
 
 ### Updating an existing installation
 
-Close Minecraft, L4D2 and the old bridge console. Pull/extract the new source, then run:
+Close Minecraft, L4D2 and the old bridge console. In Companion, click **Update and install**. It downloads and installs the newest source release while preserving worlds, backups and room settings. Update both co-op PCs. To update Companion itself, download the newer EXE from Releases.
+
+For a manual checkout, pull/extract the new source, then run:
 
 ```bat
 Update-Coop.cmd

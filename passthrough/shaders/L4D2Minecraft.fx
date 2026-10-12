@@ -8,10 +8,13 @@
 texture MCWorldTex : MCWORLD;
 texture MCDepthTex : MCDEPTH;
 texture MCOverlayTex : MCOVERLAY;
+texture MCGuiTex : MCGUI;
+uniform bool SeparateGui = false;
 // Guest RGBA bytes are uploaded unchanged into these BGRA textures; colour reads swap with .bgra.
 sampler sWorld { Texture = MCWorldTex; AddressU = CLAMP; AddressV = CLAMP; };
 sampler sDepth { Texture = MCDepthTex; MinFilter = POINT; MagFilter = POINT; AddressU = CLAMP; AddressV = CLAMP; };
 sampler sOverlay { Texture = MCOverlayTex; AddressU = CLAMP; AddressV = CLAMP; };
+sampler sGui { Texture = MCGuiTex; AddressU = CLAMP; AddressV = CLAMP; };
 
 // x = near, y = far, z = flags (1: [0,1] depth, 2: rows bottom-up, 4: reversed Z). Set by the add-on.
 uniform float3 McPlanes = float3(0.05, 2048.0, 7.0);
@@ -431,7 +434,9 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 	}
 	const float4 overlay = tex2D(sOverlay, float2(uv.x, 1.0 - uv.y)).bgra; // hand and HUD are screen-space: never shaken
 	// Guest GUI now draws teammate cards with true alpha above its shield/hand.
-	return overlay.rgb + saturate(color) * (1.0 - overlay.a);
+    color = overlay.rgb + saturate(color) * (1.0 - overlay.a);
+    if(SeparateGui){const float4 gui=tex2D(sGui,float2(uv.x,1.0-uv.y)).bgra;color=gui.rgb+color*(1.0-gui.a);}
+    return color;
 }
 
 technique MCPassthrough < ui_tooltip = "Minecraft passthrough: enabled automatically while the Minecraft link is up."; >

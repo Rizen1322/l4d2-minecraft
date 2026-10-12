@@ -92,7 +92,11 @@ L4D2MCBridge.SyncCollision <- function() {
             renderamt=0,rendermode=10,disableshadows=1,DisableBoneFollowers=1,
             targetname=UniqueString("l4d2mc_collision_")
         });
-        if (block != null) { blocks[key] <- block; ++count; }
+        if (block != null) {
+            // kRenderNone hides the mesh while keeping its solid entity networked.
+            // EF_NODRAW can suppress client transmission and break predicted collision.
+            blocks[key] <- block; ++count;
+        }
     }
 };
 // Dedicated alpha HUD state; never scrape rectangles from the rendered world.
@@ -191,6 +195,7 @@ L4D2MCBridge.ActorPoseJson <- function(player) {
         if(!own && !pinned && !hanging)visible=false;
     }
     local burning=(NetProps.GetPropInt(player,"m_fFlags")&134217728)!=0;
+    if(L4D2MCBridge.ContactBurning(player))burning=true;
     local flame=NetProps.HasProp(player,"m_hEffectEntity")?NetProps.GetPropEntity(player,"m_hEffectEntity"):null;
     if(flame!=null && flame.IsValid() && flame.GetClassname()=="entityflame")burning=true;
     local carried=player.GetActiveWeapon();

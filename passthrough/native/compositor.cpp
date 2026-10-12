@@ -13,6 +13,7 @@
 #include <mutex>
 #include <vector>
 #include <reshade.hpp>
+#include "postprocess.h"
 
 using namespace reshade::api;
 
@@ -52,6 +53,7 @@ namespace
 	HANDLE g_mapping = nullptr;
 	const uint8_t *g_view = nullptr;
 	int32_t g_slots = 0;
+    uint32_t g_frameVersion=1;
 	int64_t g_stride = 0;
 	int64_t g_lastPublish = -1;
 	DWORD g_nextOpenAttempt = 0;
@@ -71,8 +73,8 @@ namespace
 		resource tex = {0};
 		resource_view srv = {0};
 	};
-	Layer g_world, g_depth, g_overlay;
-    Layer g_worldBack, g_depthBack, g_overlayBack;
+	Layer g_world, g_depth, g_overlay, g_gui;
+    Layer g_worldBack, g_depthBack, g_overlayBack, g_guiBack;
 	uint32_t g_width = 0, g_height = 0;
 	bool g_hasFrame = false;
 	uint64_t g_hostScene = 0, g_mcScene = 0;
@@ -109,8 +111,9 @@ namespace
 			return false;
 		}
 		g_slots = read<int32_t>(header + 12);
+        g_frameVersion=read<uint32_t>(header+4);
 		g_stride = read<int64_t>(header + 16);
-		if (read<int32_t>(header + 4) != 1 || read<int32_t>(header + 8) != kHeader ||
+		if ((g_frameVersion!=1 && g_frameVersion!=2) || read<int32_t>(header + 8) != kHeader ||
 			g_slots != 3 || g_stride < 12 || g_stride > 128LL * 1024 * 1024)
 		{
 			UnmapViewOfFile(header);
@@ -150,7 +153,7 @@ namespace
 
 	void destroy_layers(device *dev)
 	{
-		for (Layer *layer : {&g_world, &g_depth, &g_overlay, &g_worldBack, &g_depthBack, &g_overlayBack})
+		for (Layer *layer : {&g_world, &g_depth, &g_overlay, &g_worldBack, &g_depthBack, &g_overlayBack,&g_gui,&g_guiBack})
 		{
 			if (layer->srv.handle != 0)
 				dev->destroy_resource_view(layer->srv);
@@ -161,7 +164,6 @@ namespace
 		g_width = g_height = 0;
 		g_hasFrame = false;
 	}
-
 	bool create_layer(device *dev, Layer &layer, uint32_t w, uint32_t h, format fmt)
 	{
 		if (!dev->create_resource(
@@ -183,6 +185,7 @@ namespace
 		runtime->update_texture_bindings("MCWORLD", g_world.srv, g_world.srv);
 		runtime->update_texture_bindings("MCDEPTH", g_depth.srv, g_depth.srv);
 		runtime->update_texture_bindings("MCOVERLAY", g_overlay.srv, g_overlay.srv);
+        runtime->update_texture_bindings("MCGUI",g_gui.srv,g_gui.srv);
 	}
 
 	/// Upload the newest published Minecraft frame, if there is one we haven't shown yet.
@@ -203,7 +206,7 @@ namespace
 		if (seq & 1)
 			return;
 		const uint32_t w = read<uint32_t>(desc + 24), h = read<uint32_t>(desc + 28);
-		if (w == 0 || h == 0 || w > 3840 || h > 2160 || uint64_t(w) * h * 12 > uint64_t(g_stride))
+		if (w == 0 || h == 0 || w > 3840 || h > 2160 || uint64_t(w) * h * (g_frameVersion==2?16:12) > uint64_t(g_stride))
 			return;
 		const uint64_t scene = read<uint64_t>(desc + 104);
 		const int64_t captured = read<int64_t>(desc + 88), completed = read<int64_t>(desc + 96);
@@ -224,7 +227,8 @@ namespace
 				!create_layer(dev, g_overlay, w, h, format::r8g8b8a8_unorm) ||
                 !create_layer(dev,g_worldBack,w,h,format::r8g8b8a8_unorm) ||
                 !create_layer(dev,g_depthBack,w,h,format::r32_float) ||
-                !create_layer(dev,g_overlayBack,w,h,format::r8g8b8a8_unorm))
+                !create_layer(dev,g_overlayBack,w,h,format::r8g8b8a8_unorm) ||
+                !create_layer(dev,g_gui,w,h,format::r8g8b8a8_unorm) || !create_layer(dev,g_guiBack,w,h,format::r8g8b8a8_unorm))
 			{
 				destroy_layers(dev);
 				return;
@@ -250,7 +254,7 @@ namespace
             dev->unmap_texture_region(layer.tex,0);
             return true;
         };
-        if (!stream(g_worldBack,base) || !stream(g_depthBack,base+layer) || !stream(g_overlayBack,base+2*layer)) {
+        if (!stream(g_worldBack,base) || !stream(g_depthBack,base+layer) || !stream(g_overlayBack,base+2*layer) || (g_frameVersion==2 && !stream(g_guiBack,base+3*layer))) {
             static DWORD nextLog=0;
             if(GetTickCount()>nextLog){reshade::log::message(reshade::log::level::warning,"MC frame upload failed; retaining previous complete frame");nextLog=GetTickCount()+5000;}
             return;
@@ -258,7 +262,7 @@ namespace
         MemoryBarrier();
         if (read<int64_t>(sharedDesc) != seq)
             return; // the guest reused this slot mid-copy: keep showing the previous complete frame
-        std::swap(g_world,g_worldBack);std::swap(g_depth,g_depthBack);std::swap(g_overlay,g_overlayBack);
+        std::swap(g_world,g_worldBack);std::swap(g_depth,g_depthBack);std::swap(g_overlay,g_overlayBack);std::swap(g_gui,g_guiBack);
         bind(runtime);
 
         // Texture bytes and metadata came from the same accepted snapshot.
@@ -361,6 +365,7 @@ namespace
     }
 	void on_present(effect_runtime *runtime)
 	{
+        source_postprocess::present(runtime);
         source_camera::publish_visibility(source_camera::gameplay_visible());
         const bool hostMenu=source_camera::menu_visible() || g_reshadeMenu.load();
         if(g_active && g_sceneVisible)g_cursorAttached=true;
@@ -417,6 +422,7 @@ namespace
 		if (on)
 			upload(runtime);
 		on = on && g_hasFrame && g_hostScene != 0 && g_mcScene == g_hostScene && GetTickCount64() - g_lastNewFrame < 500;
+        if(const auto v=find_uniform(runtime,kEffect,"SeparateGui");v.handle)runtime->set_uniform_value_bool(v,g_frameVersion==2);
 		// The technique stays enabled (preset); McActive gates it, so GTA passes through untouched until a
 		// Minecraft frame is here. (Toggling techniques from inside this callback crashes ReShade.)
 		if (const effect_uniform_variable v = find_uniform(runtime, kEffect, "McActive"); v.handle != 0)
@@ -585,9 +591,14 @@ namespace
 
 	void on_destroy_effect_runtime(effect_runtime *runtime)
 	{
+        source_postprocess::destroy(runtime);
         source_cursor::remove();g_cursorAttached=false;
 		destroy_layers(runtime->get_device());
 	}
+    bool on_scene_copy(command_list* commands,resource source,uint32_t sourceSubresource,const subresource_box* sourceBox,resource destination,uint32_t destinationSubresource,const subresource_box* destinationBox,filter_mode filter) {
+        if(g_frameVersion!=2 || !g_active || !g_sceneVisible || !g_hasFrame || !source_camera::gameplay_visible() || source_camera::menu_visible())return false;
+        return source_postprocess::copy(commands,source,sourceSubresource,sourceBox,destination,destinationSubresource,destinationBox,filter);
+    }
 }
 
 namespace compositor
@@ -599,6 +610,8 @@ namespace compositor
 		if (!reshade::register_addon(module))
 			return false;
 		reshade::register_event<reshade::addon_event::reshade_begin_effects>(on_begin_effects);
+        reshade::register_event<reshade::addon_event::init_effect_runtime>(source_postprocess::initialize);
+        reshade::register_event<reshade::addon_event::copy_texture_region>(on_scene_copy);
 		reshade::register_event<reshade::addon_event::reshade_present>(on_present);
         reshade::register_event<reshade::addon_event::reshade_open_overlay>(on_open_overlay);
 		reshade::register_event<reshade::addon_event::reshade_reloaded_effects>(on_reloaded_effects);
@@ -611,6 +624,7 @@ namespace compositor
 
 	void unregister(void *module)
 	{
+        if(source_postprocess::runtime)source_postprocess::destroy(source_postprocess::runtime);
         source_cursor::remove();g_cursorAttached=false;
         while(g_cursorShows>0){ShowCursor(FALSE);--g_cursorShows;}
 		source_input::restore();

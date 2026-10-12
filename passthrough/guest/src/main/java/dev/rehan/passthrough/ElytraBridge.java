@@ -12,10 +12,12 @@ public final class ElytraBridge {
     private static long avatarAt;
     private static long entityAt;
     private static int sequence;
+    private static final PeerActions actions=new PeerActions();
+    private static String lastSwingHand="main";
     private static volatile boolean grounded=true;
     private static volatile long groundAt;
     private ElytraBridge() {}
-    public static void reset(){rockets.clear();scene=0;sequence=0;grounded=true;groundAt=0;avatarAt=0;entityAt=0;}
+    public static void reset(){rockets.clear();actions.reset();scene=0;sequence=0;grounded=true;groundAt=0;avatarAt=0;entityAt=0;}
     /** Client supplies only the native Source grounded flag, never guest collision guesses. */
     public static void hostGrounded(boolean value){grounded=value;groundAt=System.nanoTime();}
     public static void request(boolean start) {
@@ -32,7 +34,9 @@ public final class ElytraBridge {
     public static void tick(MinecraftServer s) {
         if(!Passthrough.active || !MapBuilds.ready || s!=WorldBridge.server() || s.getPlayerList().getPlayers().isEmpty())return;
         var p=s.getPlayerList().getPlayers().getFirst();
-        long token=MapBuilds.scene();if(scene!=token){rockets.clear();sequence=0;scene=token;avatarAt=0;entityAt=0;p.stopFallFlying();}
+        long token=MapBuilds.scene();if(scene!=token){rockets.clear();actions.reset();sequence=0;scene=token;avatarAt=0;entityAt=0;p.stopFallFlying();}
+        actions.observe(p.isSwinging(),p.getSwingAnimation(0));
+        var swing=p.getCurrentSwing();if(swing!=null)lastSwingHand=swing.hand()==net.minecraft.world.InteractionHand.OFF_HAND?"off":"main";
         boolean elytra=LivingEntity.canGlideUsing(p.getItemBySlot(EquipmentSlot.CHEST),EquipmentSlot.CHEST);
         if(!elytra || grounded || System.nanoTime()-groundAt>500_000_000L)p.stopFallFlying();
         boolean flying=p.isFallFlying() && elytra,boosting=false;
@@ -51,7 +55,8 @@ public final class ElytraBridge {
             var registry=net.minecraft.core.registries.BuiltInRegistries.ITEM;
             String avatar=FlightPolicy.avatar(token,registry.getKey(p.getMainHandItem().getItem()).toString(),
                 registry.getKey(p.getOffhandItem().getItem()).toString(),registry.getKey(p.getItemBySlot(EquipmentSlot.CHEST).getItem()).toString());
-            if(avatar!=null)Passthrough.events.accept(avatar);
+            if(avatar!=null){String swingHand=lastSwingHand;
+                avatar=avatar.substring(0,avatar.length()-1)+",\"swing\":"+actions.sequence()+",\"swinghand\":\""+swingHand+"\",\"using\":"+p.isUsingItem()+",\"usehand\":\""+(p.isUsingItem() && p.getUsedItemHand()==net.minecraft.world.InteractionHand.OFF_HAND?"off":"main")+"\"}";Passthrough.events.accept(avatar);}
         }
         if(token>0 && now-entityAt>=100_000_000L) {
             entityAt=now;

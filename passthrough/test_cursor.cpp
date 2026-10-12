@@ -8,6 +8,8 @@ static HWND test_foreground(){return foreground?testWindow:nullptr;}
 #include "native/source_cursor.h"
 #undef GetForegroundWindow
 static bool gameplay=true;
+static DWORD commandThread=0;
+static bool command(const char* text){commandThread=GetCurrentThreadId();return strcmp(text,"exec l4d2mc_view")==0;}
 static HANDLE ready=nullptr,stop=nullptr;
 static bool installed=false;
 static bool verified(){return gameplay;}
@@ -33,6 +35,12 @@ int main() {
     if(!worker)return 3;
     WaitForSingleObject(ready,5000);
     if(!check(installed,"Cross-thread UI hook installation"))return 4;
+    source_commands::test_dispatch=command;
+    if(!check(GetPropW(testWindow,source_commands::ready)==reinterpret_cast<HANDLE>(1),"Native command readiness missing"))return 19;
+    ATOM cfg=GlobalAddAtomW(L"l4d2mc_view");SendMessageW(testWindow,source_commands::message_id(),cfg,77);GlobalDeleteAtom(cfg);
+    if(!check(commandThread==GetCurrentThreadId() && GetPropW(testWindow,source_commands::receipt)==reinterpret_cast<HANDLE>(77),"Owned cfg was not dispatched on the UI thread"))return 20;
+    cfg=GlobalAddAtomW(L"l4d2mc_view;quit");SendMessageW(testWindow,source_commands::message_id(),cfg,78);GlobalDeleteAtom(cfg);
+    if(!check(GetPropW(testWindow,source_commands::receipt)==reinterpret_cast<HANDLE>(77),"Command injection accepted"))return 21;
     event();if(!check(GetCursor()==nullptr,"WM_SETCURSOR arrow overwritten on UI thread"))return 5;
     for(int i=0;i<20;i++){event();if(!check(GetCursor()==nullptr,"Repeated mouse events restore arrow"))return 6;}
     gameplay=false;event();if(!check(GetCursor()!=nullptr,"Source menu cursor must survive"))return 7;

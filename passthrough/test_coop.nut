@@ -66,4 +66,7 @@ peerCtx.active=true;b.CoopWrapEvents(globalCallbacks);globalCallbacks.OnGameEven
 if(transitionCalls.len()!=2 || transitionCalls[0]!=host || transitionCalls[1]!=peer)throw "Chapter completion did not route all active actors";
 globalCallbacks.OnGameEvent_round_start({});
 if(b.epoch!=13 || b.coop.contexts.len()!=0 || b.coop.allowed.len()!=0)throw "Round reset leaked remote actors or advanced epoch twice";
+entities=[host];savedFiles.clear();b.CoopExport(host);
+if(!("l4d2mc_coop_pose.txt" in savedFiles) || savedFiles["l4d2mc_coop_pose.txt"].find("\"local_id\":1")==null)
+    throw "Host alone lost the room pose required for local block collision";
 print("Source coop context, callback and manifest regressions passed\n");

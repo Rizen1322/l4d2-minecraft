@@ -93,11 +93,8 @@ L4D2MCBridge.CoopTick <- function(host) {
 };
 L4D2MCBridge.CoopExport <- function(host) {
     local localId=CoopUserId(host),rows=[],e=null;
-    // Solo sessions have no room reader: skip the second full pose build and file write.
-    local remote=false;
-    while((e=Entities.FindByClassname(e,"player"))!=null)
-        if(e!=host && e.IsSurvivor() && !IsPlayerABot(e)){remote=true;break;}
-    if(!remote)return;
+    // A configured host room consumes local collision even before a friend joins.
+    // Always export the host; its pose is reused below, without a second pose build.
     if(host!=null && host.IsValid() && host.IsSurvivor() && !IsPlayerABot(host))rows.append(CoopContext(host,true));
     foreach(id,ctx in coop.contexts)if(ctx.player.IsValid() && ctx.player.IsSurvivor() && !IsPlayerABot(ctx.player) && rows.len()<4)rows.append(ctx);
     local out=format("{\"map\":%s,\"epoch\":%d,\"frame\":%d,\"local_id\":%d,\"players\":[",HudJsonString(Director.GetMapName()),epoch,frame,localId),n=0;

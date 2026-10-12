@@ -142,7 +142,10 @@ try {
     $bridgeArguments = @('-u', ('"' + $bridgeScript + '"'), '--game', ('"' + $Game + '"'), '--play-cfg', $playCfgName, '--restore-cfg', $restoreCfgName, '--width', ([string]$Width), '--height', ([string]$Height))
     if (Test-Path -LiteralPath $coopPath) { $bridgeArguments += @('--coop-config', ('"' + $coopPath + '"')) }
     $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList $bridgeArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
-    $sourceDestination = if ($coopJoin) { '+connect ' + $coopServer } else { '+map ' + $Map }
+    # Solo: a LAN-only local server never validates Steam tickets, so a flaky Steam
+    # connection cannot drop the host ("STEAMAUTH failure code 8 / No Steam logon").
+    # Co-op keeps normal auth: VPN ranges such as Radmin's 26.x are not LAN addresses.
+    $sourceDestination = if ($coopJoin) { '+connect ' + $coopServer } elseif (Test-Path -LiteralPath $coopPath) { '+map ' + $Map } else { '+sv_lan 1 +map ' + $Map }
     Start-Process -FilePath $steamExe -ArgumentList ('-applaunch 550 -insecure -novid ' + $windowFlags + ' -console -condebug ' + $sourceDestination) -WindowStyle Hidden
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     $nextProbe = [DateTime]::UtcNow.AddSeconds(12)
@@ -170,7 +173,7 @@ try {
         }
         $hostProcess = Get-Process left4dead2 -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowHandle -ne 0} | Select-Object -First 1
         if (!$coopJoin -and $hostProcess -and [DateTime]::UtcNow -ge $nextProbe -and (Test-SourceRenderReady)) {
-            Start-Process -FilePath $gameExe -ArgumentList ('-insecure -hijack +exec ' + $cfgName) -WindowStyle Hidden
+            & $pythonExe (Join-Path $taskRoot 'passthrough/source_commands.py') --exec $cfgName
             $nextProbe = [DateTime]::UtcNow.AddSeconds(5)
         }
         if ((Test-Path -LiteralPath $poseFile) -and (Get-Item -LiteralPath $poseFile).LastWriteTimeUtc -gt [DateTime]::UtcNow.AddSeconds(-1)) { break }
@@ -187,14 +190,14 @@ try {
         # Reattach only to this launcher-owned insecure host after a stale pose.
         if (!$coopJoin -and [DateTime]::UtcNow -ge $nextProbe -and
             (!(Test-Path -LiteralPath $poseFile) -or (Get-Item -LiteralPath $poseFile).LastWriteTimeUtc -lt [DateTime]::UtcNow.AddSeconds(-2)) -and (Test-SourceRenderReady)) {
-            Start-Process -FilePath $gameExe -ArgumentList ('-insecure -hijack +exec ' + $cfgName) -WindowStyle Hidden
+            & $pythonExe (Join-Path $taskRoot 'passthrough/source_commands.py') --exec $cfgName
             $nextProbe = [DateTime]::UtcNow.AddSeconds(5)
         }
         Start-Sleep -Milliseconds 500
     }
 } finally {
     if ($hostProcess -and !$hostProcess.HasExited) {
-        Start-Process -FilePath $gameExe -ArgumentList ('-insecure -hijack +exec ' + $restoreCfgName) -WindowStyle Hidden
+        & $pythonExe (Join-Path $taskRoot 'passthrough/source_commands.py') --exec $restoreCfgName
     }
     [IO.File]::WriteAllBytes($addonList, $initialAddons)
     if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }

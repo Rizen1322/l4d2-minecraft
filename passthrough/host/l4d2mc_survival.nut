@@ -1,4 +1,11 @@
 // Own bridge extension, no replacement of map/director scripts.
+if(!("L4D2MCBurnContacts" in getroottable()))::L4D2MCBurnContacts<-{};
+L4D2MCBridge.ContactBurning <- function(entity) {
+    local id=entity.GetEntityIndex();
+    return id in L4D2MCBurnContacts && L4D2MCBurnContacts[id].entity==entity && Time()<L4D2MCBurnContacts[id].until
+        && entity.IsValid() && entity.GetHealth()>0
+        && !(NetProps.HasProp(entity,"m_nWaterLevel") && NetProps.GetPropInt(entity,"m_nWaterLevel")>0);
+};
 if(!("survival" in L4D2MCBridge))L4D2MCBridge.survival<-{
     equipmentAt=-100.0,armor=0.0,toughness=0.0,blocking=false,player=null,
     protectionAt=-100.0,epf=[0,0,0,0,0],resistance=0,fireproof=false,meal=0.0,nextMeal=0.0,nextPressure=0.0,pressureIndex=0,replySerial=RandomInt(1000000000,1500000000),hook=false,hookLiveAt=-100.0,links={},shieldHits={},fires=[],nextShield=0.0,nextIgnite=0.0,golems={},nextAggro=0.0,aggroHits={}};
@@ -309,6 +316,8 @@ L4D2MCBridge.FireOverlap <- function(p,lo,hi) {
 };
 L4D2MCBridge.FireTick <- function(player) {
     if(Time()<survival.nextFire)return;survival.nextFire=Time()+0.2;
+    local expired=[];foreach(id,contact in L4D2MCBurnContacts)if(!contact.entity.IsValid() || Time()>contact.until)expired.append(id);
+    foreach(id in expired)delete L4D2MCBurnContacts[id];
     local stale=[];foreach(id,v in survival.fireActors)if(!v.entity.IsValid() || v.entity.GetHealth()<=0 || Time()>v.until)stale.append(id);
     foreach(id in stale)delete survival.fireActors[id];
     if(survival.fireZones.len()>0)foreach(cls in ["player","infected","witch"]) {
@@ -330,7 +339,10 @@ L4D2MCBridge.FireTick <- function(player) {
                     if(survival.fireActors.len()>=64)break;
                     survival.fireActors[id]<-{entity=e,until=Time()+4,nextIgnite=0.0,nextHit=Time()+0.25};
                 }
-                survival.fireActors[id].until=Time()+4;break;
+                survival.fireActors[id].until=Time()+4;
+                if(!(id in L4D2MCBurnContacts) || L4D2MCBurnContacts[id].entity!=e){L4D2MCBurnContacts[id]<-{entity=e,until=Time()+4,nextHit=Time()+0.25};}
+                else {L4D2MCBurnContacts[id].until=Time()+4;}
+                break;
             }
         }
     }
@@ -349,8 +361,10 @@ L4D2MCBridge.FireTick <- function(player) {
         }
         // Native entityflame supplies the game's normal burn damage. Some map
         // actors reject IgniteLifetime; supply only their otherwise missing DOT.
-        if((flame==null || !flame.IsValid() || flame.GetClassname()!="entityflame") && Time()>=v.nextHit) {
+        if((flame==null || !flame.IsValid() || flame.GetClassname()!="entityflame") && Time()>=v.nextHit
+            && (!(id in L4D2MCBurnContacts) || Time()>=L4D2MCBurnContacts[id].nextHit)) {
             e.TakeDamage(e.GetClassname()=="player" && e.IsSurvivor()?2:10,8,player);v.nextHit=Time()+0.5;
+            if(id in L4D2MCBurnContacts)L4D2MCBurnContacts[id].nextHit=Time()+0.5;
         }
     }
 };

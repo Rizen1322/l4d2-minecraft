@@ -139,7 +139,15 @@ public final class SurvivalFeatures {
             try {
                 var hit=new net.minecraft.world.phys.BlockHitResult(new net.minecraft.world.phys.Vec3(x,y,z),net.minecraft.core.Direction.UP,cell.below(),false);
                 var result=tool.useOn(new net.minecraft.world.item.context.UseOnContext(p,hand,hit));
-                if(result.consumesAction())lastIgnition=System.nanoTime();
+                if(result.consumesAction()){
+                    lastIgnition=System.nanoTime();
+                    // This path bypasses client useOn prediction. Vanilla's
+                    // server sound excludes the initiating player, so notify it.
+                    p.connection.send(new net.minecraft.network.protocol.game.ClientboundSoundPacket(
+                        net.minecraft.core.Holder.direct(net.minecraft.sounds.SoundEvents.FLINTANDSTEEL_USE),net.minecraft.sounds.SoundSource.BLOCKS,
+                        x,y,z,1.0F,p.getRandom().nextFloat()*.4F+.8F,p.getRandom().nextLong()));
+                    p.swing(hand,net.minecraft.world.item.component.SwingAnimation.DEFAULT,true);
+                }
             }finally{if(!p.level().getBlockState(cell).is(net.minecraft.tags.BlockTags.FIRE))GuestFire.release(cell);}
         });
     }

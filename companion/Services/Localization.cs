@@ -18,7 +18,12 @@ namespace L4D2MC.Companion {
    }
    return value;
   }
-  const string Catalog=@"1 / Запусти Minecraft|1 / Start Minecraft
+  const string Catalog=@"Неверный файл контрольной суммы релиза.|Invalid release checksum file.
+Обновить и установить|Update and install
+Перед обновлением закрой Minecraft и L4D2. Лаунчер можно оставить открытым.|Close Minecraft and L4D2 before updating. The launcher can stay open.
+Имя карты: только буквы, цифры и подчёркивание.|Map name: letters, numbers and underscores only.
+Карта соло / хоста · например c1m1_hotel|Solo / host map · for example c1m1_hotel
+1 / Запусти Minecraft|1 / Start Minecraft
 2 / Запусти связку|2 / Start the mashup
 Left 4 Dead 2 · папка с left4dead2.exe|Left 4 Dead 2 · folder containing left4dead2.exe
 Minecraft · папка с versions|Minecraft · folder containing versions

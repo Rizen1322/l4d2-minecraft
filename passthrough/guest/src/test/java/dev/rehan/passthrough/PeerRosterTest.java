@@ -1,6 +1,7 @@
 package dev.rehan.passthrough;
 public final class PeerRosterTest {
     public static void main(String[] args){
+        var actions=new PeerActions();actions.observe(true,0);actions.observe(true,.3F);actions.observe(true,.3F);if(actions.sequence()!=1)throw new AssertionError("Duplicate swing restarted");actions.observe(true,.1F);if(actions.sequence()!=2)throw new AssertionError("New swing reset was missed");actions.observe(false,0);actions.observe(true,0);if(actions.sequence()!=3)throw new AssertionError("Next swing lost");actions.reset();if(actions.sequence()!=0)throw new AssertionError("Scene action state leaked");
         var peer=new PeerRoster.Member(14,2,3,4,90,120,80,false,false,"none","minecraft:diamond_sword","bad:item",false);
         var input=new java.util.ArrayList<PeerRoster.Member>();input.add(peer);
         var roster=new PeerRoster(123,100,input);input.clear();

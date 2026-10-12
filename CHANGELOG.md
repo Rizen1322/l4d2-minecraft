@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.0.1-alpha.1 — command channel, teammate actions and companion fixes (2026-10-12)
+
+- Replace helper `left4dead2.exe -hijack` processes with an in-process command
+  channel: owned `l4d2mc_*` configs run through the add-on via
+  `ClientCmd_Unrestricted` on Source's window thread. Plain `ClientCmd` was
+  rejected for `exec` (`FCVAR_CLIENTCMD_CAN_EXECUTE`), and a hijack against a
+  closed game started a second, Steam-less copy.
+- Solo sessions start the local server with `sv_lan 1`, so a flaky Steam
+  connection can no longer drop the host ("STEAMAUTH failure code 8 / No Steam
+  logon"). Co-op keeps normal authentication.
+- Teammate swing/use animations, held-hand/use state and shared burning state;
+  host-aim bob pinned per render to remove tick-smoothed hand lag.
+- Flint-and-steel on a virtual floor plays its sound and swing; collision
+  proxies are explicitly `EF_NODRAW`.
+- Four-layer frame export (world, depth, hands, GUI); the compositor accepts
+  V1 and V2 frames. Early Source screen-effect pass is opt-in
+  (`L4D2MC_EARLY_EFFECTS=1`) until verified in game.
+- Companion 2.0.1: guarded update always fetches the latest release, map
+  selector/validation, settings normalization, bounded HTTP retries and
+  checksum parsing; EXE-first install and friend guides.
+- Still pending: full two-PC verification and the in-game check of the early
+  screen-effect pass. Third-person Source weapons can still show in F5.
+
 ## 2.0.0-alpha.1 — V2 transport, rendering and mobs (2026-10-12)
 
 - Separate latest avatar/mob snapshots from reliable edits and attacks; expire

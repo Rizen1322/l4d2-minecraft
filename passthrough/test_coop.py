@@ -549,4 +549,15 @@ class CoopLoopbackTests(unittest.IsolatedAsyncioTestCase):
         self.host.apply_guest(1,{**base,'rows':maximum})
         self.assertEqual(len(self.host.entity_states[1][0]),64)
 
+    async def test_peer_actions_survive_latest_snapshots(self):
+        remote=await self.join()
+        event={'t':'avatar','scene':remote.scene,'main':'minecraft:diamond_sword','off':'minecraft:shield','swing':9,'swinghand':'main','using':True,'usehand':'off'}
+        remote.guest_event(event)
+        await until(lambda:self.host.metadata.get(2,({},0))[0].get('swing')==9)
+        self.assertTrue(self.host.roster(1)['players'][0]['using'])
+        self.assertEqual(self.host.roster(1)['players'][0]['usehand'],'off')
+        for bad in ({'swing':True},{'swing':-1},{'using':'yes'},{'usehand':'invalid'}):
+            with self.assertRaises(ValueError):self.host.apply_guest(2,{**event,**bad})
+        self.assertEqual(self.host.metadata[2][0]['swing'],9)
+
 if __name__=='__main__':unittest.main()
