@@ -39,6 +39,9 @@ public final class HostTerrain {
     public static boolean shouldFreeze(Entity e){
         MinecraftServer current=server;
         if(current==null || e.level()!=current.overworld() || e instanceof Player || MobWar.isProxy(e))return false;
+        // Dead mobs are no longer reported to Source, so they never get fresh support. Freezing
+        // them stopped tickDeath and left corpses lying forever; let the death animation finish.
+        if(e instanceof net.minecraft.world.entity.LivingEntity living && living.isDeadOrDying())return false;
         if(!Passthrough.active)return true;
         if(!physical(e))return false;
         Support s=supports.get(e.getId());

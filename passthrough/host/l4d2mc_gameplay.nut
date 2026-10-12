@@ -303,6 +303,9 @@ L4D2MCBridge.CombatDamage <- function(target,amount,attacker,origin,blade=false)
     // ragdolls. Do not SetHealth/Kill or spawn one particle entity per hit.
     force=force*((amount<300?amount:300)*18)+Vector(0,0,200);
     local before=target.GetHealth();
+    // Survivors ignore TakeDamageEx with a null attacker/inflictor (Minecraft mob hits
+    // did nothing; verified live). worldspawn as the source applies the damage.
+    if(attacker==null && "Entities" in getroottable())attacker=Entities.FindByClassname(null,"worldspawn");
     if("TakeDamageEx" in target)target.TakeDamageEx(attacker,attacker,null,force,at,amount,blade?4:128);
     else target.TakeDamage(amount,blade?4:128,attacker);
     return !target.IsValid() || target.GetHealth()<before;

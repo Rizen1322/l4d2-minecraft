@@ -2,14 +2,14 @@
 import json
 import argparse
 from pathlib import Path
-from install import ROOT,GAME,GUEST,RECEIPT,digest,install_file,preflight_file,recover_pending
+from install import guest_jar,ROOT,GAME,GUEST,RECEIPT,digest,install_file,preflight_file,recover_pending
 from runtime_paths import game_path
 
 def update(game=GAME):
     game=game_path(game)
     manifest=json.loads(RECEIPT.read_text(encoding='utf-8'))
     recover_pending(manifest)
-    files=[(ROOT/'passthrough/guest/build/libs/passthrough-2.0.0.jar',GUEST/'mods/l4d2mc-guest.jar'),
+    files=[(guest_jar(),GUEST/'mods/l4d2mc-guest.jar'),
            (ROOT/'dist/L4D2Minecraft.addon32',game/'bin/l4d2mc/L4D2Minecraft.addon32'),
            (ROOT/'dist/l4d2mc_hud.vpk',game/'left4dead2/addons/l4d2mc_hud.vpk')]
     files += [(ROOT/'passthrough/shaders'/name,game/'bin/l4d2mc/shaders'/name)
@@ -32,11 +32,11 @@ def update(game=GAME):
         try:install_file(source,target,manifest)
         except PermissionError:pending.append(str(target));continue
         if digest(source)!=digest(target):raise RuntimeError('Installed hash mismatch: '+str(target))
-    guest_jar=str(GUEST/'mods/l4d2mc-guest.jar')
-    if guest_jar in pending:
+    locked_guest=str(GUEST/'mods/l4d2mc-guest.jar')
+    if locked_guest in pending:
         # The launcher runs while Minecraft is already open; its own JAR stays
         # locked until Minecraft exits. Apply it on the next closed-Minecraft run.
-        pending.remove(guest_jar)
+        pending.remove(locked_guest)
         print('Minecraft is running: the guest mod update applies after Minecraft is closed and update.py runs again.')
     if pending:raise RuntimeError('Close games before applying locked components: '+', '.join(pending))
     print(f'{len(files)} mashup components verified; no games started.')

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.6-alpha.1 — mob damage, corpses, AFK, guest JAR (2026-10-12)
+
+- Minecraft mobs could not damage survivors: Source ignores `TakeDamageEx` with a
+  null attacker on survivors (verified live). Mob hits now come from `worldspawn`.
+- Killed Minecraft mobs stayed lying forever: dead mobs get no Source floor
+  support, the void-protection freeze stopped their death tick. Dying mobs now
+  finish their death and disappear.
+- No more auto-AFK (`director_afk_timeout`, set from the server VM): leaving AFK
+  needs +attack, which belongs to Minecraft, so idle players could not return.
+- Setup failed with `Build guest jar first`: the guest JAR path was hard-coded to
+  2.0.0. It now follows the version in `gradle.properties`.
+
 ## 2.0.5-alpha.1 — companion room buttons during a session (2026-10-12)
 
 - Create/copy invitation, join and solo did nothing while the bridge was running:

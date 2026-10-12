@@ -24,6 +24,15 @@ local enemy=Enemy(),blocked=false;
 L4D2MCBridge.FindActor=function(id){return enemy;};
 L4D2MCBridge.Raycast=function(a,b,i){return blocked?{hit=true,enthit=null}:{hit=false};};
 local b=L4D2MCBridge;
+// A Minecraft mob hitting a survivor has no Source attacker; survivors ignore a null
+// TakeDamageEx source, so the hit must come from worldspawn.
+local world={name="worldspawn"},from="unset";
+::Entities<-{FindByClassname=function(p,c){return c=="worldspawn"?world:null;}};
+local survivor={hp=100,life=0,GetHealth=function(){return hp;},GetClassname=function(){return "player";},GetOrigin=function(){return Vector(16,0,0);},IsValid=function(){return true;},IsSurvivor=function(){return true;},
+    TakeDamageEx=function(a,i,w,f,p,d,t){from=a;hp-=d;}};
+b.CombatDamage(survivor,15,null,Vector(0,0,0),false);
+if(from!=world)throw "Minecraft mob hit on a survivor used a null attacker";
+delete getroottable().Entities;
 b.Event(["event","1","mobhit","4","35","0","0","0","9","iron_golem"],null);
 if(enemy.hp>=0 || enemy.hits!=1)throw "Low-roll iron golem did not one-hit common";
 enemy.hp=250;enemy.kind="player";

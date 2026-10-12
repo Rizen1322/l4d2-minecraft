@@ -35,6 +35,10 @@ IncludeScript("l4d2mc_gameplay");
 IncludeScript("l4d2mc_survival");
 IncludeScript("l4d2mc_navigation");
 L4D2MCBridge.CoopInit();
+// Never auto-idle players: leaving AFK needs +attack, which the bridge gives to
+// Minecraft, so an idle player could not return. Server-only cvar (client console
+// reports it unknown), so it is set from the server VM on every map.
+try{Convars.SetValue("director_afk_timeout",999999);}catch(error){printl("[L4D2MC BRIDGE] afk timeout: "+error);}
 L4D2MCBridge.ClearCollision <- function() {
     foreach (key, block in blocks) if (block.IsValid()) block.Kill();
     blocks.clear();

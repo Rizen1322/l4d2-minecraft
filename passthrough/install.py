@@ -56,6 +56,12 @@ def adoptable(target):
         return re.search(r'^addonpath=.*[\\/]l4d2mc\s*$',text,re.M) is not None
     return False
 
+def guest_jar():
+    """The guest JAR Gradle builds: its name follows the version in gradle.properties."""
+    text=(ROOT/'passthrough/guest/gradle.properties').read_text(encoding='utf-8')
+    version=re.search(r'^version=([0-9A-Za-z.+-]+)\s*$',text,re.M).group(1)
+    return ROOT/'passthrough/guest/build/libs'/f'passthrough-{version}.jar'
+
 def preflight_file(source,target,manifest):
     if not source.is_file():raise RuntimeError('Build component missing: '+str(source))
     key = str(target.absolute())
@@ -239,7 +245,7 @@ def install_guest_profile(source,target,manifest):
 def guest(manifest):
     global MINECRAFT
     MINECRAFT=MINECRAFT or minecraft_path()
-    jar = ROOT / "passthrough/guest/build/libs/passthrough-2.0.0.jar"
+    jar = guest_jar()
     if not jar.exists():
         raise RuntimeError("Build guest jar first")
     # Flatten the official vanilla + Fabric metadata. Replace only the gameDir
