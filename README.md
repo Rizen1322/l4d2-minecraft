@@ -13,7 +13,7 @@ Real Minecraft running inside a Left 4 Dead 2 session: Source owns the map, move
 
 *Illustration generated with OpenAI imagegen. This is promotional artwork, not a gameplay screenshot.*
 
-**Status: playable experiment / alpha.** Solo and a two-player co-op run have been tried by the author. The latest network changes have automated coverage; a full two-PC regression run is still needed. Expect rough edges around geometry, latency and unusual camera states.
+**Release: 2.0.10. Co-op is still experimental.** Solo and a two-player co-op run have been tried by the author. The latest network changes have automated coverage; a full two-PC regression run is still needed. Expect rough edges around geometry, latency and unusual camera states.
 
 **V2** separates moving-player/mob snapshots from reliable combat and building events. It adds smoother remote Steve poses, shield sounds, a native Steve-shaped teammate glow and routes that stay usable during recalculation. [V2 changes and limits](docs/V2.md).
 
@@ -30,7 +30,7 @@ Real Minecraft running inside a Left 4 Dead 2 session: Source owns the map, move
 | Mobs | Ground mobs use Source routes; golems fight infected, hostiles attack survivors and passive mobs wander. Infected, specials and Tanks can target registered Minecraft mobs. |
 | Supplies | L4D2 pickups become Minecraft supplies; rewards and item receipts survive retries. |
 | Flight | Equipped Elytra gliding and firework boosts use native Source velocity/collisions. |
-| Co-op | Shared block states, Steve teammates, separate inventories, remote mob visuals and owner-authoritative melee. |
+| Co-op | Shared blocks, Steve teammates, separate inventories, remote mob melee and hold-RMB teammate rescue. |
 | Map changes | A new scene isolates old blocks/entities when the Source map changes or restarts. |
 
 Eating/drinking slows Source movement while the item is actually being used. Slow-walk also crouches Steve visually. The teammate HUD is kept above the Minecraft foreground, including the shield.
@@ -122,6 +122,8 @@ Update-Coop.cmd
 ```
 
 It rebuilds/tests the guest, checks the Source scripts and updates owned files. It does not launch either game or replace your co-op nickname/invitation. Both co-op PCs must update before reconnecting. If a native component changes in a later release, run the full setup/build too.
+
+Hold **RMB** on a downed or ledge-hanging teammate to help them. During an active revive you can look around while staying within 96 Source units; release RMB or move away to stop. Source owns the timer. Steve uses a prone pose when downed and a help animation shown by an automatic third-person camera.
 
 ## 🤝 Co-op
 

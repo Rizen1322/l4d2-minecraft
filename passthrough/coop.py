@@ -17,6 +17,8 @@ MAX_PLAYERS=4
 MAX_BLOCKS=20000
 LEASE=1.0
 NETWORK_LEASE=5.0
+ACTOR_GRACE=3.0
+RECEIVE_TIMEOUT=15.0
 ROOM_REASONS={
     'token': 'Room invitation is invalid. Copy a new invitation from the host.',
     'source': 'Host has no fresh L4D2 player data. Host must enter the map with the bridge running.',
@@ -241,10 +243,11 @@ class CoopLink:
             p=record['pose'];feet=p['feet'];angles=p['r'];meta,at=self.metadata.get(uid,({},-math.inf))
             if now-at>=LEASE:meta={}
             row={'id':uid,'x':feet[0]/32,'y':feet[2]/32,'z':-feet[1]/32,
-                 'yaw':-float(angles[0])-90,'pitch':float(angles[1]),'hp':p.get('health',[100])[0],
-                 'dead':bool(p.get('dead',False)),'incap':bool(p.get('incap',False)), 'pin':p.get('pin','none'),
+                 'yaw':-float(p.get('reviveyaw',angles[0]) if p.get('reviving',False) else angles[0])-90,'pitch':float(angles[1]),'hp':p.get('health',[100])[0],
+                 'dead':bool(p.get('dead',False)),'incap':bool(p.get('incap',False)) and not bool(p.get('hanging',False)), 'pin':p.get('pin','none'),
                  'crouching':bool(p.get('buttons',0)&(4|131072)), 'flying':bool(p.get('flying',False)),
                  'burning':bool(p.get('burning',False)),
+                 'reviving':bool(p.get('reviving',False)),
                  'main':'minecraft:air','off':'minecraft:air','chest':'minecraft:air',**meta}
             rows.append(row)
         return {'t':'peers','scene':self.scene,'players':rows[:MAX_PLAYERS]}
@@ -290,7 +293,7 @@ class CoopLink:
                 self.event_sessions.setdefault(session_key,0);self.event_sessions.move_to_end(session_key)
                 while len(self.event_sessions)>32:self.event_sessions.popitem(last=False)
             previous=self.clients.get(uid)
-            state={'at':time.monotonic(),'events':self.inboxes.setdefault(uid,deque()),'socket':socket,'session':session};self.clients[uid]=state
+            state={'at':time.monotonic(),'events':self.inboxes.setdefault(uid,deque()),'socket':socket,'session':session,'missing_since':None};self.clients[uid]=state
             if previous is not None:
                 try:await asyncio.wait_for(previous['socket'].close(1000,'Same bridge session resumed'),1)
                 except asyncio.TimeoutError:pass
@@ -304,7 +307,15 @@ class CoopLink:
                 if request.get('t')!='tick':raise ValueError('Invalid room message')
                 live=time.monotonic()-self.received<LEASE and time.monotonic()-self.pose_at<LEASE
                 if live and uid not in self.players:
-                    await socket.close(1008,'Source actor disconnected; rejoin the room');break
+                    # A chapter can assign a new userid to the same survivor.
+                    # That is a real rebind, not a transient missing export.
+                    renamed=hello.get('player')
+                    if isinstance(renamed,str) and any(r.get('name')==renamed for ident,r in self.players.items() if ident!=self.local_id):
+                        await socket.close(1008,'Source actor disconnected; rejoin the room');break
+                    if state['missing_since'] is None:state['missing_since']=time.monotonic()
+                    if time.monotonic()-state['missing_since']>=ACTOR_GRACE:
+                        await socket.close(1008,'Source actor disconnected; rejoin the room');break
+                elif uid in self.players:state['missing_since']=None
                 state['at']=time.monotonic()
                 files=request.get('files',{})
                 if not isinstance(files,dict) or len(files)>2:raise ValueError('Mailbox limit')
@@ -340,7 +351,7 @@ class CoopLink:
                         if '_delivery' not in event:
                             self.delivery_sequence+=1;event['_delivery']=self.delivery_sequence
                 else:batch=[state['events'].popleft() for _ in range(min(8,len(state['events'])))]
-                live=time.monotonic()-self.received<LEASE and time.monotonic()-self.pose_at<LEASE
+                live=uid in self.players and time.monotonic()-self.received<LEASE and time.monotonic()-self.pose_at<LEASE
                 await socket.send(json.dumps({'t':'tick','sample':self.players.get(uid,{}).get('pose') if live else None,
                     'peers':self.roster(uid) if live else None,'entities':self.entities(uid) if live else None,'events':batch,'notices':notices,'scene':self.scene,
                     'event_ack':self.event_sessions.get(session_key,0)}))
@@ -385,7 +396,11 @@ class CoopLink:
                 else:self.ready=False;self.peers=None;self.peer_entities=None
                 now=time.monotonic();ids=[uid for uid,c in self.clients.items() if self.ready and now-c['at']<NETWORK_LEASE and uid in self.players]
                 self.sequence+=1;epoch=self.sample.get('epoch',0) if self.sample else 0
-                manifest=[f'{epoch} {self.sequence}',*[str(uid) for uid in ids],f'end {self.sequence} {len(ids)}']
+                # A stalled Source export disables controls immediately, but must
+                # not revoke the network membership and recreate the guest world.
+                members=[uid for uid,c in self.clients.items() if now-c['at']<RECEIVE_TIMEOUT and
+                         (uid in self.players or c.get('missing_since') is not None and now-c['missing_since']<ACTOR_GRACE)]
+                manifest=[f'{epoch} {self.sequence}',*[str(uid) for uid in members],f'end {self.sequence} {len(members)}']
                 atomic_text(self.ems/'l4d2mc_coop_sessions.txt','\n'.join(manifest))
                 if self.sample and self.ready:
                     text=self.files.get('collision')
@@ -436,7 +451,9 @@ class CoopLink:
                         events=self.send_batch()
                         snapshots=[event for kind,event in self.snapshots.items() if tick_at-self.snapshot_times.get(kind,-math.inf)<.75]
                         await socket.send(json.dumps({'t':'tick','scene':self.scene,'files':dict(self.files),'events':events,'snapshots':snapshots,'delivery_ack':self.delivery_ack}))
-                        result=json.loads(await asyncio.wait_for(socket.recv(),NETWORK_LEASE))
+                        # Keep transport alive through a short Wi-Fi hiccup. Source
+                        # samples still expire at LEASE; stale input is never applied.
+                        result=json.loads(await asyncio.wait_for(socket.recv(),RECEIVE_TIMEOUT))
                         if not isinstance(result,dict) or result.get('t')!='tick':raise ValueError('Invalid room tick')
                         ack=result.get('event_ack',0) if reliable else max([e['_id'] for e in events],default=0)
                         if type(ack) is not int or not 0<=ack<=self.event_sequence:raise ValueError('Invalid event acknowledgement')

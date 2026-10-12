@@ -59,6 +59,9 @@ def build(game=GAME):
     files=read_resources(game);stage=ROOT/'dist/l4d2mc_hud';stage.mkdir(parents=True,exist_ok=True)
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeaponSelection',{'xpos':3000,'visible':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudWeapon',{'visible':0,'enabled':0,'wide':0,'tall':0})
+    # Recreated from native progress data in the guest's GUI alpha layer. A
+    # Source bar drawn before composition otherwise gets covered by Steve.
+    files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'HudProgressBar',{'xpos':3000,'visible':0,'enabled':0})
     files['scripts/hudlayout.res']=patch_panel(files['scripts/hudlayout.res'],'CHudTeamDisplay',
                                             {'xpos':3000,'ypos':f'r{hud_layout.BOTTOM}','wide':0,'tall':0,'visible':0,'enabled':0})
     for name in ('teamdisplayhud','teamdisplayhud_vertical'):

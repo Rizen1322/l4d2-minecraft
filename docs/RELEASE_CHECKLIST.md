@@ -1,19 +1,12 @@
-# Source alpha release status
+# 2.0.10 release checks
 
-- Public target: `Rizen1322/l4d2-minecraft` (origin configured; no push yet).
-- Source-only ZIP, SHA256 and embedded manifest; no private HUD/JAR/loader/saves.
-- Current README, install/uninstall, known issues, credits, license and bug template.
-- Offline CI definition covers Python and source payload checks; GitHub execution
-  remains unverified until first push. Full build requires owned local games/tools.
-- Native/Fabric/Source build and regressions run locally without games.
-- Extracted source ZIP built from scratch with supplied external tool paths:
-  own collision model/materials, private HUD, guest, native and all checks passed.
-  75 Python tests,13 JVM programs,7 Source suites and Win32 cursor regression.
-- Latest additional audit passed84 Python tests with the same13 JVM programs,
-  7 Source suites and Win32 cursor regression; runtime checks still pending.
-- Clean-machine install and full in-game regression remain pending. Publish as
-  experimental source alpha, not a complete binary release or finished conversion.
+Public artifacts: unsigned Windows companion EXE and a source-only ZIP, each with SHA-256. The ZIP embeds SOURCE-MANIFEST.json. No game-derived guest JAR/HUD, game assets, world saves, private configs, credentials or toolchains are uploaded.
 
-Before attaching an artifact, use only the source ZIP and checksum from `release/`.
-Generated `dist/` and private guest mods are intentionally excluded. Review the
-prepared result before uploading; do not upload your entire workspace folder.
+- Local Python suite: 147 tests, including real loopback WebSockets, short roster gaps, Source stalls, reconnect/name reassignment, delivery receipts, retained edits and target-facing revive poses.
+- Fabric/Java build and policy programs; x86 native DLL exports and hidden Win32 cursor/command-window regression.
+- 11 Source suites: combat, protection, surfaces, golem/hostile bot targeting, native use/rescue, co-op context, peer combat, projectiles, flight and HUD.
+- WPF Release build and companion tests: RU/EN, real Unicode argv, archives, checksums/download retry, local paths and private invitations.
+- Runtime smoke: Source/ReShade/Minecraft handshake, shader compilation and full-scene composition. A new by-value ReShade descriptor call caused a test crash; changed to explicit-output D3D9 COM calls and restarted successfully. Full visual correctness is not established by this smoke check.
+- Native teammate revive, automatic third-person camera, camera-independent target-facing Steve and the action bar above Steve were confirmed by the author in game. Source progress timer properties were checked on the running map. Tank punch/knockback and hostile Minecraft mob bot targeting have code/handler coverage; extended live and two-PC checks remain pending.
+
+This is a normal GitHub release of the distribution, not a declaration that experimental co-op is complete. See KNOWN_ISSUES.md. CI checks source/Python/companion; owned local game files are required for the full build.

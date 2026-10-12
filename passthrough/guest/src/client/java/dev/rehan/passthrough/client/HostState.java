@@ -45,6 +45,14 @@ public final class HostState {
 	private static final long TIMEOUT_NANOS = 2_000_000_000L;
 	private static volatile Pose latest;
     private static volatile boolean usable,crouching,carrying,burning;
+    private static volatile boolean incapacitated,reviving;
+    private static volatile float reviveYaw,actionProgress=-1;
+    public static float reviveYaw(){return reviveYaw;}
+    public static float actionProgress(){return live()!=null?actionProgress:-1;}
+    private static volatile java.util.Set<Integer> revivers=java.util.Set.of();
+    public static boolean incapacitated(){return live()!=null && incapacitated;}
+    public static boolean reviving(){return live()!=null && reviving;}
+    public static boolean peerReviving(int id){return revivers.contains(id);}
     private static volatile boolean grounded;
     public static boolean grounded(){return live()!=null && grounded;}
     private static volatile dev.rehan.passthrough.PeerRoster peerRoster;
@@ -52,14 +60,16 @@ public final class HostState {
     public static void peers(JsonObject message){
         if(!message.has("players") || !message.get("players").isJsonArray() || !message.has("scene"))return;
         var members=new java.util.ArrayList<dev.rehan.passthrough.PeerRoster.Member>();
+        var helping=new java.util.HashSet<Integer>();
         for(var value:message.getAsJsonArray("players")){
             if(members.size()>=4)break;
-            try{var row=value.getAsJsonObject();members.add(new dev.rehan.passthrough.PeerRoster.Member(
+            try{var row=value.getAsJsonObject();if(row.has("reviving") && row.get("reviving").getAsBoolean())helping.add(row.get("id").getAsInt());members.add(new dev.rehan.passthrough.PeerRoster.Member(
                 row.get("id").getAsInt(),row.get("x").getAsDouble(),row.get("y").getAsDouble(),row.get("z").getAsDouble(),
                 row.get("yaw").getAsFloat(),row.get("pitch").getAsFloat(),row.get("hp").getAsFloat(),row.get("incap").getAsBoolean(),row.get("dead").getAsBoolean(),
                 row.get("pin").getAsString(),row.get("main").getAsString(),row.get("off").getAsString(),row.get("flying").getAsBoolean(),row.has("crouching") && row.get("crouching").getAsBoolean(),row.has("swing")?row.get("swing").getAsInt():-1,row.has("swinghand")?row.get("swinghand").getAsString():"main",row.has("using") && row.get("using").getAsBoolean(),row.has("usehand")?row.get("usehand").getAsString():"main",row.has("burning") && row.get("burning").getAsBoolean()));}catch(RuntimeException ignored){}
         }
         peerRoster=new dev.rehan.passthrough.PeerRoster(message.get("scene").getAsLong(),System.nanoTime(),members);
+        revivers=java.util.Set.copyOf(helping);
     }
     public static boolean carrying(){return live()!=null && carrying;}
     public static boolean burning(){return live()!=null && burning;}
@@ -91,6 +101,12 @@ public final class HostState {
             catch(RuntimeException ignored){} // A missing teammate row cannot interrupt camera updates.
         }
         burning=m.has("burning") && m.get("burning").getAsBoolean();
+        incapacitated=m.has("incap") && m.get("incap").getAsBoolean() && !(m.has("hanging") && m.get("hanging").getAsBoolean());
+        reviving=m.has("reviving") && m.get("reviving").getAsBoolean();
+        reviveYaw=m.has("reviveyaw")?m.get("reviveyaw").getAsFloat():0;
+        if(!Float.isFinite(reviveYaw))reviveYaw=0;
+        actionProgress=m.has("actionprogress")?m.get("actionprogress").getAsFloat():-1;
+        if(!Float.isFinite(actionProgress) || actionProgress<0 || actionProgress>1)actionProgress=-1;
         nativeUse=m.has("nativeuse") && m.get("nativeuse").getAsBoolean();
         visible=!m.has("visible") || m.get("visible").getAsBoolean();
 		carrying=m.has("carrying") && m.get("carrying").getAsBoolean();

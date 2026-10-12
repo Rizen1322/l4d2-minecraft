@@ -101,7 +101,11 @@ public final class MobWar {
 	}
 
 	public static void damage(final int id, final double amount) {
-		damage.add(new double[] {id, amount});
+        damage(id,amount,0,0,0);
+    }
+    public static void damage(final int id, final double amount, double x, double y, double z) {
+        if(!Double.isFinite(amount+x+y+z) || amount<=0 || amount>1000)return;
+        damage.add(new double[] {id,amount,Math.clamp(x,-2,2),Math.clamp(y,0,1),Math.clamp(z,-2,2)});
         var s=serverOrNull();if(s!=null && s.isSameThread())applyDamage(s.overworld());
 	}
 
@@ -244,7 +248,11 @@ public final class MobWar {
 			LivingEntity from = nearestProxy(level, mob);
 			DamageSource source = from != null ? level.damageSources().mobAttack(from) : level.damageSources().generic();
 			mob.damageCooldownTime = 0; // automatic fire lands several hits inside the usual 10-tick cooldown
-			mob.hurtServer(level, source, (float) d[1]);
+            if(mob.hurtServer(level, source, (float) d[1]) && mob.isAlive() && d.length>=5 && (d[2]!=0 || d[3]!=0 || d[4]!=0)) {
+                // Host knockback is already in Minecraft axes. Native wall/floor
+                // support handles the resulting motion; never teleport the mob.
+                mob.setDeltaMovement(mob.getDeltaMovement().add(d[2],d[3],d[4]));
+            }
 		}
 	}
 

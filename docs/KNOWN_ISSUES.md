@@ -23,6 +23,8 @@
 - Totem requires active native scene/safe floor. Full-team wipe/Director restart
   may interrupt transaction. Standard co-op armour uses post-damage nonlethal
   refund where pre-damage hook is absent; it cannot prevent every lethal hit.
+- Native bot-to-Minecraft hits are simulated against non-solid mob targets; they do not reproduce every projectile, penetration, spread or weapon modifier. Tank attack input, knockback and rescue hand animations still need a fresh two-PC run.
+- Some translucent props may draw above the guest on unsupported render paths. Reduced-resolution copies are filtered, but screen-effect composition is not universal.
 - Recent cursor, alpha HUD, safedoor, fire/TNT/fall-rescue/input fixes require
   runtime confirmation after restarting games/bridge.
 - Locally built JAR/HUD contain private game-derived assets, not public artifacts.

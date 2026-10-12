@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.10 — co-op recovery and teammate rescue (2026-10-12)
+
+- Short Source roster gaps no longer immediately disconnect a friend. A missing actor has a three-second grace period; a new userid with the same name still reconnects immediately.
+- Source camera freshness and room membership now have separate lifetimes. Stale Source data disables controls without revoking a connected guest's membership. Room receive timeout tolerates a short network stall; stale poses remain unusable.
+- Hold RMB to use L4D2's native revive/ledge rescue on a downed teammate. An active revive keeps use held inside a 96-unit radius when looking away, with a wall check. Healthy survivors do not intercept item clicks.
+- Downed Steve uses the Hunter prone pose. The helper gets a looping, crouched two-handed CPR-style animation, driven by Source's actual revive target, with an automatic temporary third-person camera; the previous F5 mode returns after the revive.
+- While helping, Steve faces the rescued teammate independently of the camera. The action bar follows Source's real timer and renders above the avatar in the final GUI layer.
+- Survivor bots can target visible hostile Minecraft mobs and deliver bounded owner-side damage. Passive mobs and friendly golems are excluded; native rescue and closer common infected take priority.
+- Tank hits request a native attack input pulse and send bounded knockback to the real Minecraft mob. Owned attack input is restored after the pulse and during cleanup.
+- Ignore reduced-resolution backbuffer copies when selecting the native screen-effect composition point. This narrows false render checkpoints; complete prop/depth correctness is still not guaranteed.
+- Companion and guest versions are 2.0.10. Published as a normal release; co-op gameplay remains experimental, with a fresh two-PC regression still pending.
+
 ## 2.0.9-alpha.1 — setup test fix (2026-10-12)
 
 - 2.0.8 treated the Minecraft launcher profile (`versions\L4D2MC-Fabric-26.3\...json`)

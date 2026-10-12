@@ -191,12 +191,12 @@ L4D2MCBridge.ActorPoseJson <- function(player) {
     local visible=true;
     if(NetProps.HasProp(player,"m_hViewEntity")) {
         local view=NetProps.GetPropEntity(player,"m_hViewEntity");
-        if(view!=null && view!=player && !pinned && !hanging)visible=false;
+        if(view!=null && view!=player && !pinned && !hanging && !player.IsIncapacitated())visible=false;
     }
     if((NetProps.GetPropInt(player,"m_fFlags")&32)!=0) {
         local id=player.GetEntityIndex();
         local own=id in L4D2MCBridge.gameplay.frozen && L4D2MCBridge.gameplay.frozen[id].entity==player && !L4D2MCBridge.gameplay.frozen[id].old;
-        if(!own && !pinned && !hanging)visible=false;
+        if(!own && !pinned && !hanging && !player.IsIncapacitated())visible=false;
     }
     local burning=(NetProps.GetPropInt(player,"m_fFlags")&134217728)!=0;
     if(L4D2MCBridge.ContactBurning(player))burning=true;
@@ -225,6 +225,18 @@ L4D2MCBridge.ActorPoseJson <- function(player) {
     for(local i=0;i<L4D2MCBridge.gameplay.ground.len();i++)data+=(i==0?"":",")+L4D2MCBridge.gameplay.ground[i];
     data+="]}";
     data=data.slice(0,data.len()-1)+",\"grounded\":"+((NetProps.GetPropInt(player,"m_fFlags")&1)!=0?"true":"false")+",\"dead\":"+(player.IsDead()?"true":"false")+",\"incap\":"+(player.IsIncapacitated()?"true":"false")+"}";
+    local reviving=NetProps.HasProp(player,"m_reviveTarget") && NetProps.GetPropEntity(player,"m_reviveTarget")!=null;
+    data=data.slice(0,data.len()-1)+",\"hanging\":"+(hanging?"true":"false")+",\"reviving\":"+(reviving?"true":"false")+"}";
+    local reviveYaw=a.y,progress=-1.0;
+    if(reviving) {
+        local target=NetProps.GetPropEntity(player,"m_reviveTarget");
+        if(target.IsValid()){local delta=target.GetOrigin()-player.GetOrigin();reviveYaw=atan2(delta.y,delta.x)*57.29578;}
+    }
+    if(NetProps.HasProp(player,"m_flProgressBarStartTime") && NetProps.HasProp(player,"m_flProgressBarDuration")) {
+        local duration=NetProps.GetPropFloat(player,"m_flProgressBarDuration"),elapsed=Time()-NetProps.GetPropFloat(player,"m_flProgressBarStartTime");
+        if(duration>0 && elapsed>=0 && elapsed<=duration)progress=elapsed/duration;
+    }
+    data=data.slice(0,data.len()-1)+format(",\"reviveyaw\":%.4f,\"actionprogress\":%.4f}",reviveYaw,progress);
     data=data.slice(0,data.len()-1)+",\"flying\":"+("FlightActive" in this && FlightActive(player)?"true":"false")+"}";
     return data;
 };

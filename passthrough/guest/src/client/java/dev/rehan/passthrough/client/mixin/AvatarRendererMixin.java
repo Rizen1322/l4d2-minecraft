@@ -28,6 +28,7 @@ abstract class AvatarRendererMixin {
             // Supply the steady glide pose from the authoritative peer flag.
             if(peer.member.flying()){state.isFallFlying=true;state.fallFlyingTimeInTicks=10;state.shouldApplyFlyingYRot=false;}
             if(peer.member.incap() || AvatarPosePolicy.prone(peer.member.pin())){state.walkAnimationSpeed=0;state.isCrouching=false;state.isFallFlying=false;state.xRot=0;}
+            if(HostState.peerReviving(peer.member.id()))passthrough$helpPose(state);
             return;
         }
 		if (p == null || entity != Minecraft.getInstance().player) {
@@ -39,11 +40,12 @@ abstract class AvatarRendererMixin {
         state.bodyRot=AvatarPosePolicy.bodyYaw(p.firstPerson(),p.yaw(),p.lookYaw());
         state.yRot=0;state.xRot=p.firstPerson()?p.pitch():p.lookPitch();
         state.isCrouching=HostState.isCrouching();
-        if(AvatarPosePolicy.prone(p.pin())) {
+        if(AvatarPosePolicy.prone(p.pin()) || HostState.incapacitated()) {
             state.walkAnimationPos=0;state.walkAnimationSpeed=0;
             state.isCrouching=false;state.isPassenger=false;state.isFallFlying=false;
             state.isVisuallySwimming=false;state.swimAmount=0;state.xRot=0;
         }
+        if(HostState.reviving()){state.bodyRot=HostState.reviveYaw();state.yRot=0;passthrough$helpPose(state);}
         if(!p.gun())return;
 
 		state.rightArmPose = HumanoidModel.ArmPose.CROSSBOW_HOLD;
@@ -58,13 +60,24 @@ abstract class AvatarRendererMixin {
     private void passthrough$hunterPin(AvatarRenderState state,PoseStack stack,float bodyYaw,float scale,CallbackInfo ci) {
         HostState.Pose p=HostState.frame();
         var player=Minecraft.getInstance().player;
-        boolean local=p!=null && player!=null && state.id==player.getId() && AvatarPosePolicy.prone(p.pin());
-        boolean peer=AvatarPosePolicy.prone(dev.rehan.passthrough.client.PeerAvatars.pin(state.id));
+        boolean local=p!=null && player!=null && state.id==player.getId() && (AvatarPosePolicy.prone(p.pin()) || HostState.incapacitated());
+        boolean peer=dev.rehan.passthrough.client.PeerAvatars.prone(state.id);
         if(!local && !peer)return;
         stack.translate(0,AvatarPosePolicy.PRONE_HEIGHT,0);
         stack.rotateDegrees(Axis.YP,180-state.bodyRot);
         stack.rotateDegrees(Axis.XP,90);
         stack.translate(0,-AvatarPosePolicy.PRONE_CENTER,0);
         ci.cancel();
+    }
+    private static void passthrough$helpPose(AvatarRenderState state) {
+        // A deliberately frantic two-handed "Minecraft CPR" while Source owns
+        // the real revive timer. Purely visual: no extra revive progress or input.
+        state.isCrouching=true;state.xRot=35;
+        state.rightArmPose=HumanoidModel.ArmPose.CROSSBOW_CHARGE;
+        state.leftArmPose=HumanoidModel.ArmPose.CROSSBOW_CHARGE;
+        state.isUsingItem=true;
+        state.useItemHand=net.minecraft.world.InteractionHand.MAIN_HAND;
+        state.maxCrossbowChargeDuration=20;
+        state.ticksUsingItem=(float)(10+9*Math.sin(state.ageInTicks*1.4));
     }
 }

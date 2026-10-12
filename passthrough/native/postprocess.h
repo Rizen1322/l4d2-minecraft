@@ -35,6 +35,19 @@ inline bool copy(reshade::api::command_list* commands,reshade::api::resource sou
     bool matches=reinterpret_cast<uintptr_t>(back)==source.handle;
     D3DSURFACE_DESC desc{};back->GetDesc(&desc);back->Release();
     if(!matches || desc.Width<320 || desc.Height<240 || desc.MultiSampleType!=D3DMULTISAMPLE_NONE)return false;
+    // Bloom/refraction also copy the backbuffer into smaller targets. They are
+    // not a full-scene checkpoint, even when Source omits the region boxes.
+    // D3D9 COM calls use explicit output parameters. Avoid ReShade's by-value
+    // resource_desc across its MSVC / our MinGW x86 ABI boundary.
+    if(!destination.handle)return false;
+    auto nativeOutput=reinterpret_cast<IDirect3DResource9*>(static_cast<uintptr_t>(destination.handle));
+    D3DSURFACE_DESC output{};HRESULT described=E_FAIL;
+    switch(nativeOutput->GetType()) {
+        case D3DRTYPE_SURFACE:described=reinterpret_cast<IDirect3DSurface9*>(nativeOutput)->GetDesc(&output);break;
+        case D3DRTYPE_TEXTURE:described=reinterpret_cast<IDirect3DTexture9*>(nativeOutput)->GetLevelDesc(0,&output);break;
+        default:return false;
+    }
+    if(FAILED(described) || output.Width!=desc.Width || output.Height!=desc.Height)return false;
     if(sourceBox && (sourceBox->left || sourceBox->top || sourceBox->right!=desc.Width || sourceBox->bottom!=desc.Height))return false;
     if(destinationBox && (destinationBox->left || destinationBox->top || destinationBox->right!=desc.Width || destinationBox->bottom!=desc.Height))return false;
     // First copy precedes translucent Source geometry. The second is the

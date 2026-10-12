@@ -7,6 +7,29 @@ from bridge import CollisionSnapshot, camera, position, surface, render_camera, 
 
 
 class SessionTests(unittest.TestCase):
+    def test_rescue_camera_restores_selected_f5_mode(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'left4dead2/cfg').mkdir(parents=True)
+            host=HostInput(root);host.perspective=2
+            with patch.object(host,'_send',return_value=True) as send:
+                host.rescue_camera(True)
+                self.assertEqual(host.view,1);self.assertEqual(host.perspective,2)
+                self.assertIn('cam_idealyaw 0',(host.cfg_dir/'l4d2mc_view.cfg').read_text())
+                host.rescue_camera(True);self.assertEqual(send.call_count,1)
+                host.rescue_camera(False)
+                self.assertEqual(host.view,2)
+                self.assertIn('cam_idealyaw 180',(host.cfg_dir/'l4d2mc_view.cfg').read_text())
+                host.perspective=0;host.rescue_camera(True);host.rescue_camera(False)
+                self.assertIn('firstperson',(host.cfg_dir/'l4d2mc_view.cfg').read_text())
+
+    def test_rescue_camera_retries_failed_command(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'left4dead2/cfg').mkdir(parents=True)
+            host=HostInput(root)
+            with patch.object(host,'_send',side_effect=[False,True]) as send:
+                host.rescue_camera(True);self.assertFalse(host.rescue_view)
+                host.rescue_camera(True);self.assertTrue(host.rescue_view)
+                self.assertEqual(send.call_count,2)
     def test_live_host_control_uses_existing_addon_without_a_game_process(self):
         from unittest.mock import patch
         host=HostInput(Path('absent-source'))
@@ -255,6 +278,13 @@ class CameraTests(unittest.TestCase):
     def test_cutscene_visibility_survives_camera_conversion(self):
         sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"visible":False}
         self.assertFalse(camera(sample,16/9)['visible'])
+
+    def test_native_revive_pose_flags_survive_camera_conversion(self):
+        sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,
+                "incap":True,"hanging":True,"reviving":True,"reviveyaw":45,"actionprogress":.4}
+        pose=camera(sample,16/9)
+        self.assertTrue(pose['incap']);self.assertTrue(pose['hanging']);self.assertTrue(pose['reviving'])
+        self.assertEqual(pose['reviveyaw'],-135);self.assertEqual(pose['actionprogress'],.4)
 
     def test_source_crouch_and_door_state_survive_camera_conversion(self):
         sample={"v":1,"f":2,"p":[0,0,64],"feet":[0,0,0],"r":[0,0,0],"hfov":90,"buttons":4,"usable":True}

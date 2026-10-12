@@ -19,6 +19,8 @@ public final class PeerAvatars {
     private static final HashMap<Integer,PeerAvatar> avatars=new HashMap<>();
     private PeerAvatars(){}
     public static String pin(int entityId){for(var avatar:avatars.values())if(avatar.getId()==entityId)return avatar.member.pin();return "none";}
+    public static boolean prone(int entityId){for(var avatar:avatars.values())if(avatar.getId()==entityId)return avatar.member.incap() || dev.rehan.passthrough.AvatarPosePolicy.prone(avatar.member.pin());return false;}
+    public static boolean reviving(int entityId){for(var avatar:avatars.values())if(avatar.getId()==entityId)return HostState.peerReviving(avatar.member.id());return false;}
     public static void frame(){
         Minecraft mc=Minecraft.getInstance();var pose=HostState.frame();var roster=HostState.peerRoster();
         boolean live=pose!=null && roster!=null && roster.live(pose.scene(),System.nanoTime());

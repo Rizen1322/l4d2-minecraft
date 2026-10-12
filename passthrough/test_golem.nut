@@ -82,7 +82,7 @@ if(json.find("0.2500,0.0000,")==null)throw "Enumeration cap starved nearby live 
 if(json.find("78.1250,0.0000,")==null)throw "Player-only range starved golem enemy";
 dofile("passthrough/host/l4d2mc_survival.nut");
 b.survival.aggroHits<-{};b.survival.nextAggro<-0;
-class Tank extends Enemy {function GetZombieType(){return 8;}}
+class Tank extends Enemy {flags=64;function GetZombieType(){return 8;}}
 local tank=Tank(903,20);tank.kind="player";
 local mobTarget=Enemy(904,16),commands=[],damageReplies=[];
 ::Entities.Next<-function(previous){return null;};
@@ -99,7 +99,29 @@ if(778 in b.survival.golems)throw "Malformed mob identifier accepted";
     local next=previous==null?0:list.find(previous)+1;return next<list.len()?list[next]:null;
 };
 b.Reply=function(value){damageReplies.append(value);return true;};b.Raycast=function(a,c,d){return {hit=false};};
+::NetProps.HasProp=function(e,p){return p=="m_lifeState" || p=="m_afButtonForced" && e==tank;};
+::NetProps.GetPropInt=function(e,p){return p=="m_afButtonForced"?e.flags:e.life;};
+::NetProps.SetPropInt<-function(e,p,value){e.flags=value;};
 b.GolemAggroTick(Enemy(905,0));
 if(commands.len()==0 || commands[0].bot!=tank)throw "Horde enumeration starved Tank aggro";
 if(damageReplies.len()==0 || damageReplies[0].find("15.00")==null || damageReplies[0].find("777")==null)throw "Tank did not attack the registered Minecraft mob";
+if(damageReplies[0].find("\"push\":[-1.1000,0.4500,")==null)throw "Tank attack omitted forward/up knockback";
+if(tank.flags!=65)throw "Tank punch did not enter native attack input";
+::Time=function(){return 1.4;};b.GolemAggroTick(Enemy(905,0));
+if(tank.flags!=64)throw "Tank punch left native attack input stuck";
+class SurvivorBot extends Tank {
+    function IsSurvivor(){return true;}
+    function IsIncapacitated(){return false;}
+    function IsHangingFromLedge(){return false;}
+    function EyePosition(){return pos+Vector(0,0,32);}
+    function GetActiveWeapon(){return {GetClassname=function(){return "weapon_smg";}};}
+}
+local helper=SurvivorBot(906,0);helper.kind="player";b.survival.nextAggro=0;
+::Entities.FindByClassnameWithin=function(previous,kind,origin,range){return kind=="player" && previous==null?helper:null;};
+::NetProps.HasProp=function(e,p){return p=="m_lifeState" || p=="m_afButtonForced";};
+commands.clear();damageReplies.clear();b.GolemAggroTick(Enemy(905,0));
+if(commands.len()!=0 || damageReplies.len()!=0)throw "Survivor bot attacked passive/friendly Minecraft mob";
+b.GolemTarget(["golem","777","zombie","16","0","0"],Enemy(905,0));b.survival.nextAggro=0;
+b.GolemAggroTick(Enemy(905,0));
+if(commands.len()!=1 || damageReplies.len()!=1 || damageReplies[0].find("777")==null || helper.flags!=65)throw "Survivor bot ignored Minecraft zombie";
 print("Source golem one-hit, corpse and wall regressions passed\n");

@@ -212,7 +212,11 @@ public final class HostLink extends WebSocketServer {
                     JsonArray p=m.getAsJsonArray("pos");dev.rehan.passthrough.SurvivalFeatures.supply(p.get(0).getAsDouble(),p.get(1).getAsDouble(),p.get(2).getAsDouble(),m.get("kind").getAsInt());
                 }
                 case "breakblock" -> WorldBridge.breakBlock(m.getAsJsonArray("pos"),m.get("d").getAsDouble());
-                case "mobdmg" -> MobWar.damage(m.get("id").getAsInt(), m.get("d").getAsDouble());
+                case "mobdmg" -> {
+                    JsonArray push=m.has("push")?m.getAsJsonArray("push"):null;
+                    if(push!=null && push.size()==3)MobWar.damage(m.get("id").getAsInt(),m.get("d").getAsDouble(),push.get(0).getAsDouble(),push.get(1).getAsDouble(),push.get(2).getAsDouble());
+                    else MobWar.damage(m.get("id").getAsInt(),m.get("d").getAsDouble());
+                }
 				case "spawnmobs" -> MobWar.spawn(m.get("k").getAsString(), m.has("n") ? m.get("n").getAsInt() : 5,
 					m.has("rmin") ? m.get("rmin").getAsDouble() : 8.0, m.has("rmax") ? m.get("rmax").getAsDouble() : 16.0,
 					m.has("arc") ? m.get("arc").getAsDouble() : 40.0, m.has("yaw") ? m.get("yaw").getAsDouble() : 0.0,

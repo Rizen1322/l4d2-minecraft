@@ -370,6 +370,11 @@ L4D2MCBridge.FireTick <- function(player) {
 };
 L4D2MCBridge.SurvivalCleanup <- function() {
     foreach(v in survival.fires)if(v.entity.IsValid())v.entity.Kill();survival.fires.clear();
+    if("aggroAttacks" in survival) {
+        foreach(id,v in survival.aggroAttacks)if(v.entity.IsValid() && NetProps.HasProp(v.entity,"m_afButtonForced"))
+            NetProps.SetPropInt(v.entity,"m_afButtonForced",(NetProps.GetPropInt(v.entity,"m_afButtonForced")&(~1))|v.old);
+        survival.aggroAttacks.clear();
+    }
     foreach(id,v in survival.golems)if(v.entity.IsValid())v.entity.Kill();survival.golems.clear();
     survival.shieldCharge=6;survival.shieldCooldown=0;survival.shieldHitAt.clear();survival.guestBurn=false;survival.effectsAt=-100.0;
     survival.blocking=false;survival.protectionAt=-100.0;survival.shieldHits.clear();survival.aggroHits.clear();
@@ -395,9 +400,30 @@ L4D2MCBridge.GolemTarget <- function(f,player) {
         survival.golems[id]<-{entity=e,pos=p,at=Time()};
     }
     local v=survival.golems[id];if(!v.entity.IsValid()){delete survival.golems[id];return;}
-    v.entity.SetOrigin(p);v.pos=p;v.at=Time();
+    v.entity.SetOrigin(p);v.pos=p;v.at=Time();v.kind<-f[2];
+};
+L4D2MCBridge.HostileMob <- function(kind) {
+    return ["zombie","husk","drowned","skeleton","stray","bogged","spider","cave_spider","creeper",
+        "pillager","vindicator","evoker","witch","ravager","wither_skeleton","blaze","silverfish","endermite",
+        "piglin_brute","hoglin","zoglin","breeze","guardian","elder_guardian","phantom","slime","magma_cube","wither","warden"].find(kind)!=null;
+};
+L4D2MCBridge.MobAttackPulse <- function(e,duration=0.12) {
+    if(!("aggroAttacks" in survival))survival.aggroAttacks<-{};
+    if(!NetProps.HasProp(e,"m_afButtonForced"))return;
+    local id=e.GetEntityIndex(),flags=NetProps.GetPropInt(e,"m_afButtonForced");
+    if(!(id in survival.aggroAttacks))survival.aggroAttacks[id]<-{entity=e,old=flags&1,until=Time()+duration};
+    NetProps.SetPropInt(e,"m_afButtonForced",flags|1);
 };
 L4D2MCBridge.GolemAggroTick <- function(player) {
+    if(!("aggroAttacks" in survival))survival.aggroAttacks<-{};
+    local released=[];foreach(id,v in survival.aggroAttacks)if(!v.entity.IsValid() || Time()>=v.until) {
+        if(v.entity.IsValid() && NetProps.HasProp(v.entity,"m_afButtonForced")) {
+            local flags=NetProps.GetPropInt(v.entity,"m_afButtonForced");
+            NetProps.SetPropInt(v.entity,"m_afButtonForced",(flags&(~1))|v.old);
+        }
+        released.append(id);
+    }
+    foreach(id in released)delete survival.aggroAttacks[id];
     local stale=[];foreach(id,v in survival.golems)if(!v.entity.IsValid() || Time()-v.at>1)stale.append(id);
     foreach(id in stale){if(survival.golems[id].entity.IsValid())survival.golems[id].entity.Kill();delete survival.golems[id];}
     stale=[];foreach(id,v in survival.aggroHits)if(!v.entity.IsValid() || Time()-v.at>3)stale.append(id);
@@ -407,11 +433,15 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
     // A horde used to fill all 64 slots before special infected were enumerated.
     local bots=[];foreach(cls in ["player","infected"]) {
         local e=null;while((e=Entities.FindByClassnameWithin(e,cls,player.GetOrigin(),1536))!=null && bots.len()<64)
-            if(ActorAlive(e) && (cls=="infected" || (!e.IsSurvivor() && IsPlayerABot(e))))bots.append(e);
+            if(ActorAlive(e) && (cls=="infected" || IsPlayerABot(e)))bots.append(e);
     }
     foreach(e in bots) {
+        local friendly=e.GetClassname()=="player" && e.IsSurvivor();
+        if(friendly && (e.IsIncapacitated() || e.IsHangingFromLedge() ||
+            (NetProps.HasProp(e,"m_reviveTarget") && NetProps.GetPropEntity(e,"m_reviveTarget")!=null)))continue;
         local best=null,bestId=0,dist=768.0;
         foreach(id,v in survival.golems) {
+            if(friendly && (!("kind" in v) || !HostileMob(v.kind)))continue;
             local d=(v.pos-e.GetOrigin()).Length();if(d>=dist || abs(v.pos.z-e.GetOrigin().z)>128)continue;
             local t=Raycast(e.GetOrigin()+Vector(0,0,32),v.pos+Vector(0,0,32),e);
             if("hit" in t && t.hit && (!("enthit" in t) || t.enthit!=v.entity))continue;
@@ -419,6 +449,28 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
         }
         if(best==null)continue;
         if(count++>=16)break;
+        if(friendly) {
+            // Keep native rescue/combat priority. Never direct a human survivor.
+            local native=Entities.FindByClassnameWithin(null,"infected",e.GetOrigin(),dist);
+            if(native!=null && ActorAlive(native))continue;
+            local weapon=e.GetActiveWeapon();if(weapon==null)continue;
+            local kind=weapon.GetClassname();local melee=kind=="weapon_melee" || kind=="weapon_chainsaw";
+            if(!melee && NetProps.HasProp(weapon,"m_iClip1") && NetProps.GetPropInt(weapon,"m_iClip1")<=0)continue;
+            if(dist>(melee?72:640))continue;
+            CommandABot({bot=e,target=best.entity,cmd=0});
+            local delta=best.pos+Vector(0,0,24)-e.EyePosition(),flat=sqrt(delta.x*delta.x+delta.y*delta.y);
+            if(flat>0.01)try{e.SnapEyeAngles(QAngle(-atan2(delta.z,flat)*57.29578,atan2(delta.y,delta.x)*57.29578,0));}catch(error){}
+            local ix=e.GetEntityIndex();
+            if(!(ix in survival.aggroHits) || survival.aggroHits[ix].entity!=e || Time()-survival.aggroHits[ix].at>=0.5) {
+                MobAttackPulse(e);
+                // The visual mob has no solid Source hitbox (survivors must not
+                // get stuck in it). Deliver bounded native bot hits to its owner.
+                local damage=melee?6.0:kind.find("shotgun")!=null?8.0:kind.find("sniper")!=null || kind=="weapon_hunting_rifle"?10.0:3.0;
+                Reply(format("\"t\":\"mobdmg\",\"id\":%d,\"d\":%.2f",bestId,damage));
+                survival.aggroHits[ix]<-{entity=e,at=Time()};
+            }
+            continue;
+        }
         // Do not redirect a special that is already pinning a survivor.
         local pin=false;foreach(prop in ["m_pounceVictim","m_jockeyVictim","m_tongueVictim","m_carryVictim","m_pummelVictim"])
             if(NetProps.HasProp(e,prop) && NetProps.GetPropEntity(e,prop)!=null)pin=true;
@@ -428,7 +480,16 @@ L4D2MCBridge.GolemAggroTick <- function(player) {
         local ix=e.GetEntityIndex();
         if(dist<72 && (!(ix in survival.aggroHits) || survival.aggroHits[ix].entity!=e || Time()-survival.aggroHits[ix].at>=1)) {
             // No solid proxy can trap survivors. Damage is sent to the real Minecraft mob.
-            Reply(format("\"t\":\"mobdmg\",\"id\":%d,\"d\":%.2f",bestId,e.GetClassname()=="player" && e.GetZombieType()==8?15.0:3.0));
+            local tank=e.GetClassname()=="player" && e.GetZombieType()==8;
+            local force="";
+            if(tank) {
+                // Let the Tank's own weapon/usercmd path animate its punch rather
+                // than only subtracting health from an invisible info_target.
+                MobAttackPulse(e,0.35);
+                local away=best.pos-e.GetOrigin();local length=sqrt(away.x*away.x+away.y*away.y);
+                if(length>0.01)force=format(",\"push\":[%.4f,%.4f,%.4f]",away.x/length*1.1,0.45,-away.y/length*1.1);
+            }
+            Reply(format("\"t\":\"mobdmg\",\"id\":%d,\"d\":%.2f%s",bestId,tank?15.0:3.0,force));
             survival.aggroHits[ix]<-{entity=e,at=Time()};
         }
     }

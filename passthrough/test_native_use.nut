@@ -5,11 +5,13 @@ local now=0.0;function Time(){return now;}
 dofile("passthrough/host/l4d2mc_gameplay.nut");
 class Vec {
     function _add(v){return this;}function _mul(n){return this;}
+    function _sub(v){return this;}function Length(){return 32;}
 }
+function Vector(x,y,z){return Vec();}
 local door={GetClassname=function(){return "prop_door_rotating_checkpoint";},GetName=function(){return "checkpoint_exit";}};
 local melee={GetClassname=function(){return "weapon_melee";}};
 local gascan={GetClassname=function(){return "weapon_gascan";}};
-local p={flags=64,weapon=null,drops=0,
+local p={flags=64,weapon=null,drops=0,rescue=null,GetOrigin=function(){return Vec();},
     GetEntityIndex=function(){return 1;},EyePosition=function(){return Vec();},
     EyeAngles=function(){return {Forward=function(){return Vec();}};},
     GetActiveWeapon=function(){return weapon;},DropItem=function(kind){drops++;weapon=null;},IsValid=function(){return true;}
@@ -17,7 +19,7 @@ local p={flags=64,weapon=null,drops=0,
 local hasForced=false;
 ::NetProps<-{
     HasProp=function(e,k){return k!="m_afButtonForced" || hasForced;},GetPropInt=function(e,k){return e.flags;},
-    SetPropInt=function(e,k,v){e.flags=v;},GetPropEntity=function(e,k){return e.weapon;}
+    SetPropInt=function(e,k,v){e.flags=v;},GetPropEntity=function(e,k){return k=="m_reviveTarget"?e.rescue:e.weapon;}
 };
 ::EntFire<-function(...){throw "Native checkpoint use replaced with forced entity input";};
 local commands=[],useDown=false;
@@ -65,4 +67,17 @@ b.epoch<-123;b.TotemPendingFor<-function(player){return true;};b.TotemTick<-func
 if(!b.ReadGameplay(p) || useDown || b.gameplay.nativeUseIntent || b.gameplay.usePulseUntil!=0)throw "Pending dead-player rescue kept native use held";
 p.weapon=melee;p.drops=0;b.Event(["event","8","interact"],p);
 if(p.drops!=0 || p.weapon!=melee)throw "Door use dropped the hidden melee sidearm";
+local downed={GetClassname=function(){return "player";},GetName=function(){return "";},IsSurvivor=function(){return true;},IsDead=function(){return false;},IsIncapacitated=function(){return true;},IsHangingFromLedge=function(){return false;}};
+downed.IsValid<-function(){return true;};downed.GetOrigin<-function(){return Vec();};
+b.Raycast=function(...){return {enthit=downed,hit=true};};
+if(!b.Usable(p))throw "Downed teammate is not a native RMB use target";
+downed.IsIncapacitated=function(){return false;};downed.IsHangingFromLedge=function(){return true;};
+if(!b.Usable(p))throw "Hanging teammate is not a native RMB use target";
+downed.IsHangingFromLedge=function(){return false;};
+if(b.Usable(p))throw "Healthy survivor captured native item clicks";
+downed.IsIncapacitated=function(){return true;};p.rescue=downed;
+b.Raycast=function(...){return {hit=false};};
+if(!b.Usable(p))throw "Moving aim cancelled a nearby native revive";
+b.Raycast=function(...){return {hit=true,enthit=null};};
+if(b.Usable(p))throw "Revive hold ignored a wall";
 print("Native checkpoint press/hold and carry-drop regressions passed\n");

@@ -10,5 +10,5 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Hud.class)
 abstract class TeamHudMixin {
     @Inject(method="extractRenderState",at=@At("TAIL"))
-    private void passthrough$teammates(GuiGraphicsExtractor gui,DeltaTracker delta,CallbackInfo ci){TeamHud.extract(gui);}
+    private void passthrough$teammates(GuiGraphicsExtractor gui,DeltaTracker delta,CallbackInfo ci){TeamHud.extract(gui);dev.rehan.passthrough.client.ActionHud.extract(gui);}
 }

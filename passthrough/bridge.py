@@ -422,7 +422,7 @@ def camera(sample, aspect):
     vfov = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) / (4 / 3)))
     pin=sample.get('pin','none')
     if pin not in ('none','hunter','jockey','smoker','charger'):pin='none'
-    return {"t": "cam", "pin":pin,"teamhud":sample.get('teamhud',[])[:3],"teammates":max(0,min(3,int(sample.get('teammates',0)))), "f": int(sample["f"]), "p": position(sample["p"]),
+    return {"t": "cam", "pin":pin,"incap":bool(sample.get("incap",False)),"hanging":bool(sample.get("hanging",False)),"reviving":bool(sample.get("reviving",False)),"reviveyaw":-float(sample.get('reviveyaw',yaw))-90,"actionprogress":float(sample.get('actionprogress',-1)),"teamhud":sample.get('teamhud',[])[:3],"teammates":max(0,min(3,int(sample.get('teammates',0)))), "f": int(sample["f"]), "p": position(sample["p"]),
             "pl": position(sample["feet"]), "r": [-yaw - 90, pitch, -roll],
             "fov": vfov, "fp": True, "h": -yaw - 90, "look":[-yaw-90,pitch], "gun": False, "grounded":bool(sample.get("grounded",True)), "nativeuse":bool(sample.get("nativeuse",False)),"visible":bool(sample.get("visible",True)),"usable":bool(sample.get("usable",False)),"carrying":bool(sample.get("carrying",False)),"burning":bool(sample.get("burning",False)),"sneak":bool(sample.get("buttons",0)&(4|131072))}
 
@@ -546,6 +546,7 @@ class HostInput:
         self.cfg_dir = game / 'left4dead2' / 'cfg'
         self.disabled = False
         self.perspective = 0
+        self.rescue_view = False
         self.pitch = mouse_pitch(self.cfg_dir / 'config.cfg')
         self.play_cfg,self.restore_cfg=play_cfg,restore_cfg
         self.controls_enabled=False
@@ -609,17 +610,28 @@ class HostInput:
 
     def cycle_perspective(self):
         self.perspective=(self.perspective+1)%3
+        self._apply_view(self.view)
+
+    @property
+    def view(self):return 1 if self.rescue_view else self.perspective
+
+    def rescue_camera(self,active):
+        active=bool(active)
+        if active==self.rescue_view:return
+        if self._apply_view(1 if active else self.perspective):self.rescue_view=active
+
+    def _apply_view(self,view):
         # Front view (2) behaves like Minecraft's: Steve faces the camera. Source keeps
         # the camera pitch equal to the aim, so invert m_pitch (mouse-up raises the
         # camera) and the guest mirrors Steve's head (he looks up at it). Commands go
-        # through an owned cfg file: -hijack argv drops any value starting with '-'.
-        lines=['firstperson',f'm_pitch {self.pitch:.6f}'] if self.perspective==0 else ['thirdperson',
+        # through an owned cfg file in the existing Source process.
+        lines=['firstperson',f'm_pitch {self.pitch:.6f}'] if view==0 else ['thirdperson',
             'cam_idealdist 96','cam_ideallag 0','cam_idealpitch 0','c_thirdpersonshoulderoffset 0',
-            'c_maxyaw 180','c_minyaw -180','cam_idealyaw '+('180' if self.perspective==2 else '0'),
-            f'm_pitch {(-self.pitch if self.perspective==2 else self.pitch):.6f}']
+            'c_maxyaw 180','c_minyaw -180','cam_idealyaw '+('180' if view==2 else '0'),
+            f'm_pitch {(-self.pitch if view==2 else self.pitch):.6f}']
         try:(self.cfg_dir/'l4d2mc_view.cfg').write_text('\n'.join(lines)+'\n',encoding='ascii')
-        except OSError:return
-        self._send(['+exec','l4d2mc_view'])
+        except OSError:return False
+        return self._send(['+exec','l4d2mc_view'])
 
     def controls(self,active):
         if active==self.controls_enabled or time.monotonic()<self.next_controls_send:return
@@ -630,7 +642,7 @@ class HostInput:
                 self.next_controls_send=time.monotonic()+0.5
                 return
         self.controls_enabled=active
-        if not active:self.perspective=0
+        if not active:self.perspective=0;self.rescue_view=False
 
 
 async def transmit(args):
@@ -720,14 +732,15 @@ async def connected_loop(args, memory, inputs, host_input, frames, render,room=N
                                 await socket.send(json.dumps({'t':'world','map':guest_map[0],'epoch':guest_map[1],'scene':collision.scene}))
                                 last_world_request=time.monotonic()
                             pose = camera(sample, args.width / args.height)
+                            host_input.rescue_camera(bool(sample.get('reviving',False)))
                             actual=render.read()
                             pose = render_camera(pose, actual, last_render)
                             if 'render_sequence' in pose:
                                 last_render = pose
                             pose['scene']=collision.scene
                             pose['visible']=bool(sample.get('visible',True)) and map_ready
-                            pose['fp'] = host_input.perspective==0 and not sample.get('pinned',False)
-                            pose['front'] = host_input.perspective==2
+                            pose['fp'] = host_input.view==0 and not any(sample.get(k,False) for k in ('pinned','incap','hanging'))
+                            pose['front'] = host_input.view==2
                             identity = (sample["map"], sample.get("epoch",0), map_ready, sample["f"], pose.get('render_sequence'))
                             if identity != last_frame:
                                 memory.publish(pose)

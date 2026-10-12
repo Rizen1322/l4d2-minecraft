@@ -347,9 +347,21 @@ L4D2MCBridge.WalkableFloor <- function(t,ignore) {
     return slopes[0]*slopes[0]+slopes[1]*slopes[1]<=1.0408; // normal.z >= .7
 };
 L4D2MCBridge.Usable <- function(player) {
+    // Once native revive owns a teammate, keep the held use independent of aim.
+    // Source still owns progress/cancellation, and range/occlusion cannot be bypassed.
+    if(NetProps.HasProp(player,"m_reviveTarget"))try {
+        local target=NetProps.GetPropEntity(player,"m_reviveTarget");
+        if(target!=null && target.IsValid() && target!=player && target.IsSurvivor() && !target.IsDead() &&
+            (target.IsIncapacitated() || target.IsHangingFromLedge()) && (target.GetOrigin()-player.GetOrigin()).Length()<=96) {
+            local t=Raycast(player.EyePosition(),target.GetOrigin()+Vector(0,0,24),player);
+            if(!("hit" in t && t.hit) || ("enthit" in t && t.enthit==target))return true;
+        }
+    }catch(error){}
     local p=player.EyePosition(),trace=Raycast(p,p+player.EyeAngles().Forward()*96,player);
     if(!("enthit" in trace) || trace.enthit==null)return false;
     local kind=trace.enthit.GetClassname();local name=trace.enthit.GetName();
+    if(kind=="player")return trace.enthit!=player && trace.enthit.IsSurvivor() && !trace.enthit.IsDead() &&
+        (trace.enthit.IsIncapacitated() || trace.enthit.IsHangingFromLedge());
     if(name!=null && (name.find("l4d2mc_collision_")==0 || name.find("l4d2mc_entity_")==0))return false;
     return kind.find("door")!=null || kind=="func_button" || kind.find("weapon_")==0 || kind.find("prop_physics")==0 || kind=="func_useableladder";
 };

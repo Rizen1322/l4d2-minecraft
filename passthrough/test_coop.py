@@ -61,6 +61,33 @@ class CoopLoopbackTests(unittest.IsolatedAsyncioTestCase):
         if self.remote:await self.remote.close()
         await self.host.close();self.temp.cleanup()
 
+    async def test_brief_roster_gap_keeps_same_transport(self):
+        remote=await self.join();owner=self.host.clients[2]['socket']
+        self.peer_uid=3
+        await until(lambda:2 not in self.host.players)
+        await asyncio.sleep(.35)
+        self.assertIs(self.host.clients[2]['socket'],owner)
+        self.assertIsNone(RoomSource(remote).read(),'Missing actor must not receive stale controls')
+        self.peer_uid=2
+        await until(lambda:RoomSource(remote).read() is not None)
+        self.assertIs(self.host.clients[2]['socket'],owner)
+
+    async def test_source_stall_preserves_membership_not_controls(self):
+        remote=await self.join();owner=self.host.clients[2]['socket']
+        self.frozen=True
+        await asyncio.sleep(LEASE+.2)
+        self.assertIsNone(RoomSource(remote).read())
+        rows=(self.ems/'l4d2mc_coop_sessions.txt').read_text().splitlines()
+        self.assertIn('2',rows[1:-1])
+        self.assertIs(self.host.clients[2]['socket'],owner)
+        self.frozen=False
+        await until(lambda:RoomSource(remote).read() is not None)
+
+    async def test_reviver_faces_target_in_peer_roster(self):
+        self.host.players[1]['pose'].update(reviving=True,reviveyaw=30)
+        row=next(row for row in self.host.roster(2)['players'] if row['id']==1)
+        self.assertTrue(row['reviving']);self.assertEqual(row['yaw'],-120)
+
     async def test_auth_rejection_and_duplicate_userid_preserve_owner(self):
         for token,uid in [('incorrect',2),(TOKEN,1),(TOKEN,99)]:
             async with websockets.connect(f'ws://127.0.0.1:{self.port}') as socket:
