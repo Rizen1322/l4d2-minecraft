@@ -71,6 +71,10 @@ def preflight_file(source,target,manifest):
             raise RuntimeError(f"Existing unowned file: {target}")
         return False
     elif target.exists() and digest(target) != manifest[key]:
+        # ReShade rewrites its own ReShade.ini/preset.ini while the game runs, so every
+        # update after playing saw "changed externally". Our own files are refreshed;
+        # the changed copy is kept next to them (see install_file).
+        if adoptable(target):return True
         raise RuntimeError(f"Installed file was changed externally: {target}")
     return True
 
@@ -120,8 +124,8 @@ def install_file(source,target,manifest):
         print(f'Preserved identical pre-existing file without taking ownership: {target}')
         return
     key=str(target.absolute())
-    if target.exists() and key not in manifest:
-        # Adopting a previous install's file: keep the old bytes next to it.
+    if target.exists() and (key not in manifest or digest(target)!=manifest[key]):
+        # Adopting a previous install's or runtime-rewritten file: keep the old bytes next to it.
         shutil.copy2(target,target.with_name(target.name+'.l4d2mc-previous'))
     original=digest(target) if target.exists() else None
     target.parent.mkdir(parents=True, exist_ok=True)

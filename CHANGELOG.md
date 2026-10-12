@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.8-alpha.1 — updates after playing (2026-10-12)
+
+- Every update after a game session failed with `Installed file was changed
+  externally: bin\ReShade.ini`: ReShade rewrites its own ReShade.ini/preset.ini
+  while the game runs. The mod's own files are now refreshed even when changed,
+  and the changed copy is kept as `*.l4d2mc-previous`. Foreign files are still refused.
+
 ## 2.0.7-alpha.1 — teammate outline only when hidden (2026-10-12)
 
 - The Steve-shaped teammate outline used a prop's constant glow, which also draws

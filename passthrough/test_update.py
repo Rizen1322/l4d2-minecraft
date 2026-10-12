@@ -18,6 +18,11 @@ class AdoptionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):install.preflight_file(source,dll,{})
             ours=root/'l4d2mc'/'preset.ini';ours.parent.mkdir();ours.write_text('old')
             self.assertTrue(install.preflight_file(source,ours,{}))
+            # ReShade rewrites its own ini while the game runs; an owned, changed copy is refreshed.
+            owned=root/'owned'/'ReShade.ini';owned.parent.mkdir();owned.write_text('[ADDON]\nAddonPath=E:\\L4D2\\bin\\l4d2mc\n')
+            record={str(owned.absolute()):install.digest(owned)}
+            owned.write_text('[ADDON]\nAddonPath=E:\\L4D2\\bin\\l4d2mc\n[OVERLAY]\nTutorialProgress=4\n')
+            self.assertTrue(install.preflight_file(source,owned,record))
 
 class UpdatePreflightTests(unittest.TestCase):
     def test_missing_late_component_never_updates_earlier_files(self):
