@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.9-alpha.1 — setup test fix (2026-10-12)
+
+- 2.0.8 treated the Minecraft launcher profile (`versions\L4D2MC-Fabric-26.3\...json`)
+  as a replaceable mod file because of its name, so a user-changed profile could be
+  overwritten and the installer's own test failed on some PCs. Launcher profiles are
+  excluded again; they keep the separate move-aside rule.
+
 ## 2.0.8-alpha.1 — updates after playing (2026-10-12)
 
 - Every update after a game session failed with `Installed file was changed

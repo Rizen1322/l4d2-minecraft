@@ -49,6 +49,9 @@ def adoptable(target):
     qualify; other loaders such as a foreign d3d9.dll are still refused.
     """
     parts=[part.lower() for part in target.parts]
+    # Minecraft launcher profiles (versions/L4D2MC-Fabric-*/...) can hold the user's
+    # own launcher changes and are moved aside by install_guest_profile instead.
+    if 'versions' in parts[:-1]:return False
     if 'l4d2mc' in parts[:-1] or target.name.lower().startswith('l4d2mc'):return True
     if target.name.lower()=='reshade.ini':
         try:text=target.read_text(encoding='utf-8',errors='replace').lower()

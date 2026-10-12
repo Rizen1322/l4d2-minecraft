@@ -23,6 +23,8 @@ class AdoptionTests(unittest.TestCase):
             record={str(owned.absolute()):install.digest(owned)}
             owned.write_text('[ADDON]\nAddonPath=E:\\L4D2\\bin\\l4d2mc\n[OVERLAY]\nTutorialProgress=4\n')
             self.assertTrue(install.preflight_file(source,owned,record))
+            profile=root/'versions'/'L4D2MC-Fabric-26.3'/'L4D2MC-Fabric-26.3.json';profile.parent.mkdir(parents=True);profile.write_text('user launcher change')
+            self.assertFalse(install.adoptable(profile))
 
 class UpdatePreflightTests(unittest.TestCase):
     def test_missing_late_component_never_updates_earlier_files(self):
