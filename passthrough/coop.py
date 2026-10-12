@@ -76,13 +76,27 @@ class CoopLink:
         self.clients={};self.players={};self.local_id=0;self.scene=None;self.sequence=0;self.ledger={};self.collisions={};self.metadata={}
         self.entity_states={};self.peer_entities=None
         self.task=None;self.server=None;self.ready=False;self.error=None
-        self.status=None
+        self.status=None;self.status_dirty=False
         self.snapshot_lane=False;self.snapshots={};self.snapshot_times={}
+        self.io_failures=0;self.last_io_notice=-math.inf
+    def persist(self,path,text):
+        # Source and scanners can briefly hold a Windows file open. Persistence
+        # is retried with the newest snapshot; it must not close a healthy room.
+        try:atomic_text(path,text);return True
+        except OSError:
+            self.io_failures+=1
+            now=time.monotonic()
+            if now-self.last_io_notice>=10:
+                self.last_io_notice=now
+                print('Co-op: temporary file contention; retrying latest state ('+path.name+').',flush=True)
+            return False
     def set_status(self,state,detail):
         value={'state':state,'detail':detail}
-        if value==self.status:return
+        if value==self.status:
+            if self.status_dirty:self.status_dirty=not self.persist(self.ems/'l4d2mc_room_status.txt',json.dumps(value,ensure_ascii=True))
+            return
         self.status=value
-        atomic_text(self.ems/'l4d2mc_room_status.txt',json.dumps(value,ensure_ascii=True))
+        self.status_dirty=not self.persist(self.ems/'l4d2mc_room_status.txt',json.dumps(value,ensure_ascii=True))
         print('Co-op: '+detail,flush=True)
     def check_task(self):
         if self.task and self.task.done():
@@ -150,7 +164,9 @@ class CoopLink:
             feet=self.players[userid]['pose']['feet'];origin=[feet[0]/32,feet[2]/32,-feet[1]/32]
             if sum((origin[i]-target[i+2])**2 for i in range(3))>25:return
             queue=self.outbound if owner==self.local_id else self.inboxes.setdefault(owner,deque())
-            if sum(e.get('t')=='peerattack' for e in queue)>=64:raise ValueError('Peer attack backlog limit')
+            # A slow owner's Minecraft is congestion, not an invalid sender.
+            # Leave the event unacknowledged so the reliable lane retries it.
+            if sum(e.get('t')=='peerattack' for e in queue)>=64:return False
             # Damage dedupe lives in the owner's Minecraft process, which can
             # outlive a room bridge restart in the same Source scene.
             # perf_counter uses the process-shared high-resolution QPC on Windows;
@@ -335,7 +351,7 @@ class CoopLink:
                     if reliable:
                         if type(ident) is not int or ident<1:raise ValueError('Invalid event sequence')
                         if ident<=self.event_sessions[session_key]:continue
-                    if request.get('scene')==self.scene:self.apply_guest(uid,event)
+                    if request.get('scene')==self.scene and self.apply_guest(uid,event) is False:break
                     if reliable:self.event_sessions[session_key]=ident
                 notices={}
                 for kind in ('pickups','rewards'):
@@ -364,18 +380,21 @@ class CoopLink:
         lines=text.splitlines();head=lines[0].split() if lines else []
         if len(lines)<2 or not self.sample:return
         if kind=='gameplay':
-            if len(head)!=9 or head[1]!=self.sample['map'] or head[8]!=str(self.sample['epoch']):raise ValueError('Wrong mailbox scene')
+            if len(head)!=9:raise ValueError('Invalid gameplay header')
             if lines[-1]!=f'end {head[3]} {len(lines)-2}':raise ValueError('Partial gameplay file')
-            atomic_text(self.ems/f'l4d2mc_coop_{uid}.txt',text)
+            if head[1]!=self.sample['map'] or head[8]!=str(self.sample['epoch']):return False
+            return self.persist(self.ems/f'l4d2mc_coop_{uid}.txt',text)
         else:
-            if len(head)!=3 or head[1]!=self.sample['map'] or head[2]!=str(self.sample['epoch']) or len(lines)>514:raise ValueError('Wrong collision scene')
+            if len(head)!=3 or len(lines)>514:raise ValueError('Invalid collision header')
             rows=[]
             for line in lines[1:-1]:
                 values=[int(v) for v in line.split()]
                 if len(values)!=3 or any(abs(v)>1023 for v in values):raise ValueError('Invalid collision cell')
                 rows.append(tuple(values))
             if lines[-1]!=f'end {head[0]} {len(rows)}':raise ValueError('Partial collision file')
+            if head[1]!=self.sample['map'] or head[2]!=str(self.sample['epoch']):return False
             self.collisions[uid]=(rows,time.monotonic())
+            return True
     async def host_loop(self):
         while True:
             try:
@@ -401,7 +420,7 @@ class CoopLink:
                 members=[uid for uid,c in self.clients.items() if now-c['at']<RECEIVE_TIMEOUT and
                          (uid in self.players or c.get('missing_since') is not None and now-c['missing_since']<ACTOR_GRACE)]
                 manifest=[f'{epoch} {self.sequence}',*[str(uid) for uid in members],f'end {self.sequence} {len(members)}']
-                atomic_text(self.ems/'l4d2mc_coop_sessions.txt','\n'.join(manifest))
+                self.persist(self.ems/'l4d2mc_coop_sessions.txt','\n'.join(manifest))
                 if self.sample and self.ready:
                     text=self.files.get('collision')
                     if text:self.accept_file(self.local_id,'collision',text)
@@ -412,7 +431,7 @@ class CoopLink:
                     def distance(c):return min(((c[0]+.5)*32-p[0])**2+(-(c[2]+.5)*32-p[1])**2+((c[1]+.5)*32-p[2])**2 for p in centres) if centres else 0
                     rows=sorted(cells,key=lambda c:(distance(c),c))[:512]
                     body=[f'{self.sequence} {self.sample["map"]} {epoch}',*['%d %d %d'%c for c in rows],f'end {self.sequence} {len(rows)}']
-                    atomic_text(self.ems/'l4d2mc_collision.txt','\n'.join(body))
+                    self.persist(self.ems/'l4d2mc_collision.txt','\n'.join(body))
             except (OSError,ValueError,KeyError,TypeError,AttributeError):self.ready=False;self.peers=None;self.peer_entities=None
             await asyncio.sleep(.033)
     async def client_loop(self):
@@ -467,7 +486,7 @@ class CoopLink:
                         if self.sample:
                             identity=(self.scene,self.sample['f'])
                             if identity!=self.pose_identity:self.pose_identity=identity;self.pose_at=self.received
-                            atomic_text(self.ems/'l4d2mc_pose.txt',json.dumps(self.sample,ensure_ascii=True))
+                            self.persist(self.ems/'l4d2mc_pose.txt',json.dumps(self.sample,ensure_ascii=True))
                         fresh=self.sample is not None and time.monotonic()-self.pose_at<LEASE
                         self.set_status('ready' if fresh else 'waiting_source','Room connected; L4D2 camera received.' if fresh else ROOM_REASONS['source'])
                         self.peers=result.get('peers');self.notices=result.get('notices',{})

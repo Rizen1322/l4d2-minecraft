@@ -12,7 +12,7 @@ namespace L4D2MC.Companion {
     public sealed class Downloads {
         readonly HttpClient http;
         readonly Action<string> log;readonly Action<double> progress;readonly string cache;
-        public Downloads(string cache,Action<string> log,Action<double> progress,HttpMessageHandler handler=null){http=handler==null?new HttpClient():new HttpClient(handler);http.Timeout=TimeSpan.FromMinutes(30);this.cache=cache;this.log=log;this.progress=progress;Directory.CreateDirectory(cache);http.DefaultRequestHeaders.UserAgent.ParseAdd("L4D2MC-Companion/2.0.10");}
+        public Downloads(string cache,Action<string> log,Action<double> progress,HttpMessageHandler handler=null){http=handler==null?new HttpClient():new HttpClient(handler);http.Timeout=TimeSpan.FromMinutes(30);this.cache=cache;this.log=log;this.progress=progress;Directory.CreateDirectory(cache);http.DefaultRequestHeaders.UserAgent.ParseAdd("L4D2MC-Companion/2.0.11");}
         public static Dictionary<string,object> Obj(object value)=>(Dictionary<string,object>)value;
         public static IEnumerable<object> Arr(object value)=>((IEnumerable)value).Cast<object>();
         async Task<HttpResponseMessage> Response(string url){

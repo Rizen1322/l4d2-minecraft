@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import websockets
 from coop import CoopLink, RoomSource, LEASE
@@ -211,6 +212,25 @@ class CoopLoopbackTests(unittest.IsolatedAsyncioTestCase):
         self.host.entity_states[1]=([[7,'minecraft:pig',100,1,0,0,0]],time.monotonic())
         self.host.apply_guest(2,{'t':'peerattack','scene':self.host.scene,'owner':1,'id':7,'d':4})
         self.assertFalse(self.host.outbound)
+
+    async def test_congested_combat_owner_keeps_sender_connected_and_retries_in_order(self):
+        remote=await self.join();original=self.host.clients[2]['socket']
+        self.host.guest_event({'t':'peerentitystate','scene':self.host.scene,'rows':[[7,'minecraft:pig',20,1,0,0,0]]})
+        self.host.outbound.extend({'t':'peerattack','scene':self.host.scene,'seq':i+1} for i in range(64))
+        remote.guest_event({'t':'peerattack','scene':remote.scene,'owner':1,'id':7,'d':4})
+        remote.guest_event({'t':'peerblocks','scene':remote.scene,'rows':[[12,2,3,17]]})
+        await until(lambda:remote.event_sequence>=2)
+        await asyncio.sleep(.12)
+        self.assertIs(self.host.clients[2]['socket'],original)
+        self.assertIsNotNone(RoomSource(remote).read())
+        self.assertEqual(len(remote.guest_out),2,'Blocked hit must not ACK the following edit')
+        self.assertNotIn((12,2,3),self.host.ledger)
+        self.host.outbound.clear();self.host.receipts.clear()
+        await until(lambda:not remote.guest_out and self.host.ledger.get((12,2,3))==17)
+        self.assertEqual(sum(e.get('t')=='peerattack' for e in self.host.outbound),1)
+        await asyncio.sleep(.08)
+        self.assertEqual(sum(e.get('t')=='peerattack' for e in self.host.outbound),1,'Retry applied damage twice')
+        self.assertIs(self.host.clients[2]['socket'],original)
 
     async def test_local_delivery_waits_for_commit_after_send(self):
         event={'t':'peerattack','scene':self.host.scene,'seq':1}
@@ -533,6 +553,65 @@ class CoopLoopbackTests(unittest.IsolatedAsyncioTestCase):
         try:self.host.accept_file(2,'gameplay',partial)
         except ValueError:pass
         self.assertEqual((self.ems/'l4d2mc_coop_2.txt').read_text(),complete)
+
+    async def test_stale_mailboxes_keep_socket_and_cannot_replace_current_scene(self):
+        remote=await self.join();original=self.host.clients[2]['socket']
+        current='generation c1m1_hotel 1 12 0 0 0 0 1\nend 12 0'
+        self.host.accept_file(2,'gameplay',current)
+        remote.files.update(gameplay='generation old_map 1 13 0 0 0 0 0\nend 13 0',
+                            collision='13 old_map 0\n1 2 3\nend 13 1')
+        received=remote.received
+        await until(lambda:remote.received>received)
+        await asyncio.sleep(.12)
+        self.assertIs(self.host.clients[2]['socket'],original)
+        self.assertIsNotNone(RoomSource(remote).read())
+        self.assertEqual((self.ems/'l4d2mc_coop_2.txt').read_text(),current)
+        self.assertNotIn(2,self.host.collisions)
+        fresh='generation c1m1_hotel 1 14 0 0 0 0 1\nend 14 0'
+        remote.files['gameplay']=fresh
+        remote.files['collision']='14 c1m1_hotel 1\n1 2 3\nend 14 1'
+        await until(lambda:(self.ems/'l4d2mc_coop_2.txt').read_text()==fresh and 2 in self.host.collisions)
+        self.assertIs(self.host.clients[2]['socket'],original)
+
+    async def test_host_file_contention_retries_without_disconnect(self):
+        import coop
+        remote=await self.join();original=self.host.clients[2]['socket'];write=coop.atomic_text
+        def locked(path,text):
+            if path.name in ('l4d2mc_coop_2.txt','l4d2mc_coop_sessions.txt','l4d2mc_collision.txt'):
+                raise PermissionError('simulated Windows sharing violation')
+            return write(path,text)
+        text='generation c1m1_hotel 1 12 0 0 0 0 1\nend 12 0'
+        with patch('coop.atomic_text',side_effect=locked):
+            remote.files['gameplay']=text
+            await until(lambda:self.host.io_failures>=3)
+            await asyncio.sleep(.12)
+            self.assertIs(self.host.clients[2]['socket'],original)
+            self.assertIsNotNone(RoomSource(remote).read())
+            self.assertFalse(self.host.task.done())
+        await until(lambda:(self.ems/'l4d2mc_coop_2.txt').exists())
+        self.assertEqual((self.ems/'l4d2mc_coop_2.txt').read_text(),text)
+        self.assertIs(self.host.clients[2]['socket'],original)
+
+    async def test_guest_pose_and_status_file_contention_keeps_live_memory(self):
+        import coop
+        remote=await self.join();original=self.host.clients[2]['socket'];write=coop.atomic_text
+        def locked(path,text):
+            if path.parent==remote.ems:raise PermissionError('simulated Windows sharing violation')
+            return write(path,text)
+        with patch('coop.atomic_text',side_effect=locked):
+            remote.set_status('ready','Room connected; L4D2 camera received.')
+            remote.status_dirty=True
+            remote.set_status('ready','Room connected; L4D2 camera received.')
+            self.assertTrue(remote.status_dirty)
+            await until(lambda:remote.io_failures>=3)
+            self.assertIsNotNone(RoomSource(remote).read())
+            self.assertIs(self.host.clients[2]['socket'],original)
+            self.assertFalse(remote.task.done())
+        previous=remote.received
+        await until(lambda:remote.received>previous)
+        persisted=json.loads((remote.ems/'l4d2mc_pose.txt').read_text())
+        self.assertGreater(persisted['f'],0)
+        await until(lambda:not remote.status_dirty)
 
     async def test_peer_entity_ids_are_scoped_to_authenticated_owner(self):
         remote=await self.join()

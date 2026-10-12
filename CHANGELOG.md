@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.11 — room transport under contention (2026-10-12)
+
+- A correctly framed mailbox from an older map/epoch is discarded instead of disconnecting its sender. Malformed packets remain rejected, and old commands never replace current map state.
+- Temporary Windows sharing failures while writing host mailboxes, collision/session manifests, guest pose logs or room status no longer tear down the room. The next fresh snapshot retries the write; log messages are limited to one per ten seconds.
+- A full remote-mob combat queue applies reliable backpressure instead of treating its sender as invalid. The blocked hit and following edits stay unacknowledged until capacity is available; camera snapshots continue and accepted damage is not duplicated.
+- Added four real loopback socket regressions covering stale-map files, host/guest file contention, ordered combat retries and recovery on the same connection. Versions are 2.0.11 for the companion and guest.
+- This reduces specific avoidable disconnect paths; genuine network loss, Source stalls and the remaining render-order limitations are still possible.
+
 ## 2.0.10 — co-op recovery and teammate rescue (2026-10-12)
 
 - Short Source roster gaps no longer immediately disconnect a friend. A missing actor has a three-second grace period; a new userid with the same name still reconnects immediately.

@@ -13,7 +13,7 @@ Real Minecraft running inside a Left 4 Dead 2 session: Source owns the map, move
 
 *Illustration generated with OpenAI imagegen. This is promotional artwork, not a gameplay screenshot.*
 
-**Release: 2.0.10. Co-op is still experimental.** Solo and a two-player co-op run have been tried by the author. The latest network changes have automated coverage; a full two-PC regression run is still needed. Expect rough edges around geometry, latency and unusual camera states.
+**Release: 2.0.11. Co-op is still experimental.** Solo and a two-player co-op run have been tried by the author. The latest network changes have automated coverage; a full two-PC regression run is still needed. Expect rough edges around geometry, latency and unusual camera states.
 
 **V2** separates moving-player/mob snapshots from reliable combat and building events. It adds smoother remote Steve poses, shield sounds, a native Steve-shaped teammate glow and routes that stay usable during recalculation. [V2 changes and limits](docs/V2.md).
 
