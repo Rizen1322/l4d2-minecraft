@@ -23,11 +23,18 @@ inline bool execute(const wchar_t* cfg){
     static void* engine=nullptr;
     if(!engine){auto module=GetModuleHandleW(L"engine.dll");auto factory=module?reinterpret_cast<void*(__cdecl*)(const char*,int*)>(GetProcAddress(module,"CreateInterface")):nullptr;engine=factory?factory("VEngineClient013",nullptr):nullptr;}
     if(!source_camera::readable(engine,sizeof(void*)))return false;
-    auto table=*reinterpret_cast<void***>(engine);if(!source_camera::readable(table,107*sizeof(void*)))return false;
-    // VEngineClient013 ClientCmd_Unrestricted (L4D2 layout) queues local console
-    // input without CLIENTCMD_CAN_EXECUTE's restriction on exec. The payload is
-    // still limited to owned cfg names above; no arbitrary commands are accepted.
-    reinterpret_cast<void(__thiscall*)(void*,const char*)>(table[106])(engine,text);
+    auto table=*reinterpret_cast<void***>(engine);if(!source_camera::readable(table,104*sizeof(void*)))return false;
+    // Retail engine.dll (build 10097), found through CEngineClient's RTTI vtable:
+    //   slot 7   ClientCmd: adds text with the restricted source flags (exec rejected);
+    //   slot 103 ExecuteClientCmd: Cbuf_AddText(text, unrestricted) + execute, ret 4;
+    //   slot 106 is NOT a command function (two-argument vector bounds): calling it
+    //            as ClientCmd_Unrestricted crashed tier0 with 0xC0000417.
+    // Verify slot 103's prologue before every call; a game update that moves it
+    // disables the channel instead of crashing. Payload stays limited to owned cfgs.
+    static const unsigned char expected[]={0x55,0x8B,0xEC,0x8B,0x45,0x08,0x6A,0x00,0x50,0xE8};
+    const unsigned char* code=reinterpret_cast<const unsigned char*>(table[103]);
+    if(!source_camera::readable(code,sizeof(expected)) || std::memcmp(code,expected,sizeof(expected))!=0)return false;
+    reinterpret_cast<void(__thiscall*)(void*,const char*)>(table[103])(engine,text);
     return true;
 }
 inline void handle(const CWPRETSTRUCT& event){

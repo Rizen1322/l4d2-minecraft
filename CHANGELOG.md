@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.3-alpha.1 — no more Steam kick, crash-safe command channel (2026-10-12)
+
+- Host got dropped after a while with "STEAMAUTH failure code 8 / No Steam
+  logon": every helper `left4dead2.exe -hijack` initialized Steam and
+  invalidated the running game's auth ticket. Commands no longer use `-hijack`.
+- The in-process channel now calls the correct engine function. Disassembly of
+  retail `engine.dll` (build 10097) through CEngineClient's RTTI vtable showed
+  slot 103 is `ExecuteClientCmd` (unrestricted add + execute) and slot 106 is an
+  unrelated two-argument vector function, which caused the 2.0.1 crash. The
+  add-on checks slot 103's prologue bytes before each call; after a game update
+  that moves it, the channel refuses instead of crashing.
+
 ## 2.0.2-alpha.1 — L4D2 crash on start fixed (2026-10-12)
 
 - L4D2 closed about a second after the map loaded: retail build 10097 crashed in
