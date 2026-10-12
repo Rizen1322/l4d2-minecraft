@@ -72,6 +72,8 @@ Python, Java, Zig, ReShade и Squirrel готовы.|Python, Java, Zig, ReShade 
 Подключение сохранено|Connection saved
 Поехали|Let's play
 Приглашение скопировано. Передай его другу в общей LAN/VPN сети.|Invitation copied. Share it with your friend on the same LAN/VPN.
+Режим комнаты применится при следующем запуске связки.|The room mode applies the next time you start the bridge.
+Подожди: сейчас идёт игра или установка. Это действие доступно после неё.|Wait: a game session or installation is running. This action is available after it.
 Приглашение|Invitation
 Присоединиться к другу|Join a friend
 Проверить ещё раз|Check again

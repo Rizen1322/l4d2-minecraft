@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.5-alpha.1 — companion room buttons during a session (2026-10-12)
+
+- Create/copy invitation, join and solo did nothing while the bridge was running:
+  every action went through one busy-locked job, and the game session keeps it
+  busy. Room actions now run immediately (they only write the local room config),
+  show a confirmation, and note that the mode applies at the next bridge start.
+  Other actions report why they are unavailable instead of silently doing nothing.
+
 ## 2.0.4-alpha.1 — reinstall from a new folder (2026-10-12)
 
 - Installing from the companion's project folder failed with `Existing unowned
