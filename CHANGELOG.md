@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.2-alpha.1 — L4D2 crash on start fixed (2026-10-12)
+
+- L4D2 closed about a second after the map loaded: retail build 10097 crashed in
+  `tier0.dll` (0xC0000417) when the add-on called VEngineClient slot 106 as
+  `ClientCmd_Unrestricted` for the first `exec`. Owned configs go through
+  Source's `-hijack` forwarding again, started from the running game's own
+  executable and only while its window exists, so no second Steam-less copy.
+
 ## 2.0.1-alpha.1 — command channel, teammate actions and companion fixes (2026-10-12)
 
 - Replace helper `left4dead2.exe -hijack` processes with an in-process command
