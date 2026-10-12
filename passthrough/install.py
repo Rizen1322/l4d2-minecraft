@@ -6,6 +6,7 @@ import json
 import shutil
 import urllib.request
 import os
+import re
 import tempfile
 from runtime_paths import game_path, minecraft_path
 
@@ -39,11 +40,28 @@ def validate_reshade(path):
         if 'binary' in locals():binary.close()
 
 
+def adoptable(target):
+    """A stale copy of this mod's own file left by an install from another project folder.
+
+    The receipt lives in the project, so a reinstall from a new folder (the
+    companion's AppData project) sees its own previous files as unowned. Only
+    L4D2MC-namespaced files and a ReShade.ini pointing at the l4d2mc add-on folder
+    qualify; other loaders such as a foreign d3d9.dll are still refused.
+    """
+    parts=[part.lower() for part in target.parts]
+    if 'l4d2mc' in parts[:-1] or target.name.lower().startswith('l4d2mc'):return True
+    if target.name.lower()=='reshade.ini':
+        try:text=target.read_text(encoding='utf-8',errors='replace').lower()
+        except OSError:return False
+        return re.search(r'^addonpath=.*[\\/]l4d2mc\s*$',text,re.M) is not None
+    return False
+
 def preflight_file(source,target,manifest):
     if not source.is_file():raise RuntimeError('Build component missing: '+str(source))
     key = str(target.absolute())
     if target.exists() and key not in manifest:
         if digest(target) != digest(source):
+            if adoptable(target):return True
             raise RuntimeError(f"Existing unowned file: {target}")
         return False
     elif target.exists() and digest(target) != manifest[key]:
@@ -96,6 +114,9 @@ def install_file(source,target,manifest):
         print(f'Preserved identical pre-existing file without taking ownership: {target}')
         return
     key=str(target.absolute())
+    if target.exists() and key not in manifest:
+        # Adopting a previous install's file: keep the old bytes next to it.
+        shutil.copy2(target,target.with_name(target.name+'.l4d2mc-previous'))
     original=digest(target) if target.exists() else None
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor,filename=tempfile.mkstemp(prefix='.l4d2mc-',dir=target.parent)

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.4-alpha.1 — reinstall from a new folder (2026-10-12)
+
+- Installing from the companion's project folder failed with `Existing unowned
+  file: ...\bin\ReShade.ini` when the mod had been installed before from another
+  folder: the ownership receipt lives in the project. The installer now adopts
+  its own previous files (`l4d2mc*` names, `l4d2mc` folders, and a`ReShade.ini`
+  whose `AddonPath` is the `l4d2mc` add-on folder) and keeps the old copy as
+  `*.l4d2mc-previous`. Foreign loaders such as another `d3d9.dll` are still refused.
+
 ## 2.0.3-alpha.1 — no more Steam kick, crash-safe command channel (2026-10-12)
 
 - Host got dropped after a while with "STEAMAUTH failure code 8 / No Steam

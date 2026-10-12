@@ -6,6 +6,19 @@ from unittest.mock import patch
 import update
 import install
 
+class AdoptionTests(unittest.TestCase):
+    def test_previous_install_files_are_adopted_but_foreign_loaders_are_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'new.ini';source.write_text('[ADDON]\nAddonPath=X\\bin\\l4d2mc\n')
+            old=root/'ReShade.ini';old.write_text('[ADDON]\nAddonPath=E:\\Games\\L4D2\\bin\\l4d2mc\n[GENERAL]\n')
+            self.assertTrue(install.preflight_file(source,old,{}))
+            foreign=root/'ReShade.ini';foreign.write_text('[ADDON]\nAddonPath=C:\\other\\addons\n')
+            with self.assertRaises(RuntimeError):install.preflight_file(source,foreign,{})
+            dll=root/'d3d9.dll';dll.write_bytes(b'other loader')
+            with self.assertRaises(RuntimeError):install.preflight_file(source,dll,{})
+            ours=root/'l4d2mc'/'preset.ini';ours.parent.mkdir();ours.write_text('old')
+            self.assertTrue(install.preflight_file(source,ours,{}))
+
 class UpdatePreflightTests(unittest.TestCase):
     def test_missing_late_component_never_updates_earlier_files(self):
         self.check_preflight('missing')
