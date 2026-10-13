@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — performance presets and scan reduction
+## 2.0.12 — performance presets and scan reduction (2026-10-13)
 
 - Companion Play now offers Quality (existing default), Balanced (75% guest dimensions / 90 FPS) and Low-end PC (50% / 60 FPS), in RU/EN. Source resolution is unchanged; each PC chooses independently.
 - Empty/occluded guest pixels bypass lighting, grade and haze fetches; empty bloom pixels skip further work.

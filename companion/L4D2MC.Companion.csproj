@@ -6,7 +6,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>L4D2MC-Companion</AssemblyName>
     <RootNamespace>L4D2MC.Companion</RootNamespace>
-    <Version>2.0.11</Version>
+    <Version>2.0.12</Version>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>

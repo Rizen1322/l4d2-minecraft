@@ -25,7 +25,7 @@ Both PCs need the same release, their own games and a shared LAN/VPN network. Th
 
 ## Updates
 
-Development builds with the performance selector expose **Play → Minecraft performance**. Choose Balanced or Low-end PC to lower only the guest renderer's resolution and frame cap; Quality preserves the previous defaults. See [performance notes](PERFORMANCE.md). These changes are not yet in the published 2.0.11 EXE.
+Version 2.0.12 adds **Play → Minecraft performance**. Choose Balanced or Low-end PC to lower only the guest renderer's resolution and frame cap; Quality preserves the previous defaults. See [performance notes](PERFORMANCE.md). Each PC can choose its own preset.
 
 Close both games, open Setup and click **Update and install** on both PCs. This updates source and rebuilds the installed components in one action. **Download / update project** only changes source; it does not install the new guest/native binaries. Restart Minecraft and the bridge afterward. Download a newer companion EXE from Releases when the app itself changes; it does not replace its own executable.
 

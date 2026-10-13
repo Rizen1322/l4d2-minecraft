@@ -1,12 +1,14 @@
-# 2.0.11 release checks
+# 2.0.12 release checks
 
-Public artifacts: unsigned Windows companion EXE and a source-only ZIP, each with SHA-256. The ZIP embeds SOURCE-MANIFEST.json. No game-derived guest JAR/HUD, game assets, world saves, private configs, credentials or toolchains are uploaded.
+Public artifacts: unsigned Windows companion EXE and source-only ZIP, each with SHA-256. The ZIP embeds SOURCE-MANIFEST.json. Game-derived guest JAR/HUD, assets, worlds, private configs, credentials and toolchains are excluded.
 
-- Local Python suite: 151 tests, including real loopback WebSockets, short roster gaps, Source stalls, reconnect/name reassignment, delivery receipts, retained edits, target-facing revive poses, stale-map mailboxes, Windows file contention and combat queue backpressure.
-- Fabric/Java build and policy programs; x86 native DLL exports and hidden Win32 cursor/command-window regression.
-- 11 Source suites: combat, protection, surfaces, golem/hostile bot targeting, native use/rescue, co-op context, peer combat, projectiles, flight and HUD.
-- WPF Release build and companion tests: RU/EN, real Unicode argv, archives, checksums/download retry, local paths and private invitations.
-- Runtime smoke on 2.0.10 (native/render code unchanged in 2.0.11): Source/ReShade/Minecraft handshake, shader compilation and full-scene composition. A new by-value ReShade descriptor call caused a test crash; changed to explicit-output D3D9 COM calls and restarted successfully. Full visual correctness is not established by this smoke check.
-- Native teammate revive, automatic third-person camera, camera-independent target-facing Steve and the action bar above Steve were confirmed by the author in game. Source progress timer properties were checked on the running map. Tank punch/knockback and hostile Minecraft mob bot targeting have code/handler coverage; extended live and two-PC checks remain pending.
+- Python suite: 158 tests, including loopback co-op recovery, retained events, stale poses, file contention, performance presets, aspect/bounds and metadata-cache expiry.
+- Fabric/Java build and policy programs: collision-cache invalidation, entity load/unload identity, stable nearest selection and the existing gameplay policies.
+- x86 native exports and hidden Win32 cursor/command-window regression.
+- 11 Source suites, including navigation corner reuse with live geometry traces, combat, rescue, co-op, flight and HUD.
+- WPF Release build and companion tests: RU/EN, actual Unicode launcher argv with the performance preset, archive/checksum handling and private invitations. English Play layout inspected.
+- Source-only packaging allowlist checked before publication. CI checks Python/source/companion; the full local build requires owned game files.
 
-This is a normal GitHub release of the distribution, not a declaration that experimental co-op is complete. See KNOWN_ISSUES.md. CI checks source/Python/companion; owned local game files are required for the full build.
+No games were launched for the 2.0.12 optimization audit or release. ReShade runtime compilation, visual/collision correctness and performance measurements remain pending. Earlier 2.0.10 runtime checks and author-confirmed revive behavior do not validate the new shader or collision changes. A fresh two-PC gameplay check remains pending.
+
+This normal distribution release does not declare experimental co-op complete. See KNOWN_ISSUES.md and PERFORMANCE.md.
