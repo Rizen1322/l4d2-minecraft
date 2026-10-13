@@ -2,8 +2,17 @@
 L4D2MCBridge.navigation <- {jobs={},index=0};
 L4D2MCBridge.NavMin <- function(a,b){return a<b?a:b;};
 L4D2MCBridge.NavMax <- function(a,b){return a>b?a:b;};
+L4D2MCBridge.NavBounds <- function(area) {
+    // Navmesh corners are static for the loaded map. Dynamic blockage and
+    // actual floor/portal traces below must still be evaluated every time.
+    if(!("bounds" in navigation))navigation.bounds<-{};
+    local id=area.GetID();
+    if(id in navigation.bounds)return navigation.bounds[id];
+    if(navigation.bounds.len()>=2048)navigation.bounds.clear();
+    local value=[area.GetCorner(0),area.GetCorner(2)];navigation.bounds[id]<-value;return value;
+};
 L4D2MCBridge.NavPortal <- function(a,b,dir,width,height) {
-    local an=a.GetCorner(0),as=a.GetCorner(2),bn=b.GetCorner(0),bs=b.GetCorner(2);
+    local ab=NavBounds(a),bb=NavBounds(b),an=ab[0],as=ab[1],bn=bb[0],bs=bb[1];
     local radius=width/2+1,pa=null,pb=null,lo=0.0,hi=0.0,gap=0.0;
     if(dir==0 || dir==2) {
         lo=NavMax(an.x,bn.x);hi=NavMin(as.x,bs.x);

@@ -181,6 +181,10 @@ final class ClientInput {
 				}
 			}
 			case "view" -> {
+                // Runtime-only setting in the private guest; quality restores
+                // the previous unlimited preset without rewriting options.txt.
+                minecraft.options.framerateLimit().set(m.has("fps")?Math.clamp(m.get("fps").getAsInt(),30,260):260);
+                FrameExporter.setLowCostEffects(m.has("lowfx") && m.get("lowfx").getAsBoolean());
                 // Idempotent: reconnects must not restore/resize a matching window.
 				int w = m.get("w").getAsInt(), h = m.get("h").getAsInt();
                 if(!viewSize.accept(w,h,minecraft.getWindow().getScreenWidth(),minecraft.getWindow().getScreenHeight()))return;

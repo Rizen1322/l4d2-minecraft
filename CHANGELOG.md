@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — performance presets and scan reduction
+
+- Companion Play now offers Quality (existing default), Balanced (75% guest dimensions / 90 FPS) and Low-end PC (50% / 60 FPS), in RU/EN. Source resolution is unchanged; each PC chooses independently.
+- Empty/occluded guest pixels bypass lighting, grade and haze fetches; empty bloom pixels skip further work.
+- Collision snapshots skip exact all-air chunk sections and check loaded availability once per column. Full replacement bounds and missing/overflow abort semantics are retained.
+- Complete stationary collision snapshots have bounded reuse, invalidated by edits, movement, scene/world changes and missing chunks.
+- Projectile and brain-mob load/unload indexes remove repeated whole-world enumeration. Stable nearest-64 selection avoids sorting every reported mob and evaluates distance once.
+- Static nav bounds are cached; dynamic blockage and portal/floor traces remain live. Unchanged Source JSON is not reparsed on every fast bridge poll, with bounded forced reads and unchanged stale-frame expiry.
+- Reprojection retains all 24 search steps and 12 refinements, hoisting invariant vector work and replacing repeated exponentiation with a geometric schedule. Low-end PC suppresses cosmetic bloom/contact shadows/edge smoothing, preserving lighting/depth checks.
+- Added preset/bounds/aspect, cache/entity lifecycle, nearest selection and file-cache tests; extended the real launcher argv and Source nav regressions. The Python suite has 158 tests. See docs/PERFORMANCE.md for hotspots and limitations. Runtime profiling and visual/collision validation remain pending; games were not started for this audit.
+
 ## 2.0.11 — room transport under contention (2026-10-12)
 
 - A correctly framed mailbox from an older map/epoch is discarded instead of disconnecting its sender. Malformed packets remain rejected, and old commands never replace current map state.

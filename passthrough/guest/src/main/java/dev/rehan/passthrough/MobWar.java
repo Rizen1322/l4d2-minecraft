@@ -47,6 +47,16 @@ public final class MobWar {
 	private static final double FOLLOW_RANGE = 48.0;
 	/** Host people further than this from the player aren't mirrored, nor mobs reported (blocks). */
 	private static final double REPORT_RANGE = 96.0;
+    private static final LoadedEntityIndex<Mob> loadedMobs=new LoadedEntityIndex<>();
+    private static ServerLevel indexedLevel;private static boolean mobsSeeded;
+    private static void indexMob(Entity entity,ServerLevel level){
+        if(level.dimension()!=net.minecraft.world.level.Level.OVERWORLD || !(entity instanceof Mob mob))return;
+        if(indexedLevel!=level){loadedMobs.clear();indexedLevel=level;mobsSeeded=false;}
+        loadedMobs.load(mob.getId(),mob);
+    }
+    static void onEntityUnload(Entity entity,ServerLevel level){
+        if(indexedLevel==level && entity instanceof Mob mob)loadedMobs.unload(mob.getId(),mob);
+    }
 
 	/** The newest "peds" list from the host, flattened [handle, x, y, z, ...] (WebSocket thread -> server tick). */
 	private static final AtomicReference<double[]> peds = new AtomicReference<>();
@@ -111,6 +121,7 @@ public final class MobWar {
 
 	/** New mobs (and mobs loaded again) hunt proxies; stale proxies from an earlier session are removed. */
 	static void onEntityLoad(final Entity e, final ServerLevel level) {
+        indexMob(e,level);
         if(!MapBuilds.ownsEntity(e))return;
 		if (e instanceof Villager v && v.entityTags().contains(PROXY_TAG) && !proxies.containsValue(v)) {
 			v.discard();
@@ -162,8 +173,10 @@ public final class MobWar {
 	/** Every server tick (server thread). */
 	static void tick(final MinecraftServer s) {
 		ServerLevel level = s.overworld();
+        if(indexedLevel!=level){loadedMobs.clear();indexedLevel=level;mobsSeeded=false;}
+        if(!mobsSeeded){for(Entity entity:level.getAllEntities())indexMob(entity,level);mobsSeeded=true;}
 		syncProxies(level);
-        if(Passthrough.active)for(var e:level.getAllEntities())if(e instanceof Mob mob && BRAIN_MOBS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath()) && MapBuilds.ownsEntity(mob)) {
+        if(Passthrough.active)for(Mob mob:loadedMobs.values())if(!mob.isRemoved() && BRAIN_MOBS.contains(BuiltInRegistries.ENTITY_TYPE.getKey(mob.getType()).getPath()) && MapBuilds.ownsEntity(mob)) {
             var target=nearestProxy(level,mob);var memory=net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET;
             if(target!=null)mob.getBrain().setMemory(memory,target);else mob.getBrain().eraseMemory(memory);
         }
@@ -277,8 +290,8 @@ public final class MobWar {
 			return;
 		}
 
-		List<Entity> near = level.getEntities((Entity) null, player.getBoundingBox().inflate(REPORT_RANGE), e->e instanceof Mob && !isProxy(e) && MapBuilds.ownsEntity(e));
-        near.sort(java.util.Comparator.comparingDouble(player::distanceToSqr));
+		List<Entity> near = level.getEntities((Entity) null, player.getBoundingBox().inflate(REPORT_RANGE), e->e instanceof Mob && e.isAlive() && !isProxy(e) && MapBuilds.ownsEntity(e));
+        near=NearestLimit.select(near,64,player::distanceToSqr);
 		if (near.isEmpty() && !reportedMobs) {
 			return;
 		}
@@ -391,6 +404,7 @@ public final class MobWar {
 	}
 
 	static void detach(final MinecraftServer s) {
+        loadedMobs.clear();indexedLevel=null;mobsSeeded=false;
 		// Only Source stand-ins are transient; keep user-spawned Minecraft mobs.
 		clearProxies(); // User-spawned mobs remain in the private Minecraft save.
 		proxies.clear();

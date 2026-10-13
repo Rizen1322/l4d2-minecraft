@@ -45,6 +45,8 @@ public final class FrameExporter {
 	private static final int SLOT_DESC_BYTES = 128;
 	private static final int MAX_W = 3840;
 	private static final int MAX_H = 2160;
+    private static boolean lowCostEffects;
+    public static void setLowCostEffects(boolean value){lowCostEffects=value;}
 	private static final long LAYER_MAX = (long)MAX_W * MAX_H * 4;
 	private static final long STRIDE = LAYER_MAX * 4;
 	private static final int RING = 3;
@@ -79,6 +81,7 @@ public final class FrameExporter {
         GpuBuffer gui;
 		int width;
 		int height;
+        boolean lowCost;
 		long generation;
 		boolean busy;
 		long busySince;
@@ -193,6 +196,7 @@ public final class FrameExporter {
 		c.far = far;
 		c.frame = ++frameCounter;
 		c.captureNanos = now;
+        c.lowCost=lowCostEffects;
 		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
 		net.minecraft.world.phys.Vec3 cam = mc.gameRenderer.mainCamera().position();
 		c.camX = cam.x;
@@ -272,7 +276,7 @@ public final class FrameExporter {
 			m.set(FLOAT, desc + 32, NEAR);
 			m.set(FLOAT, desc + 36, c.far);
 			m.set(FLOAT, desc + 40, dev.rehan.passthrough.WorldProjection.renderFov(p.fov()));
-			m.set(INT, desc + 44, (RenderSystem.getDevice().getDeviceInfo().isZZeroToOne() ? 1 : 0) | 2 | 4);
+			m.set(INT, desc + 44, (RenderSystem.getDevice().getDeviceInfo().isZZeroToOne() ? 1 : 0) | 2 | 4 | (c.lowCost?8:0));
 			// The camera Minecraft actually rendered from: re-projection is exact only for that pose.
 			m.set(DOUBLE, desc + 48, c.camX);
 			m.set(DOUBLE, desc + 56, c.camY);

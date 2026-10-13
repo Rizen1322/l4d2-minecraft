@@ -22,9 +22,10 @@ namespace L4D2MC.Companion {
         public string Map {get;set;}="c1m1_hotel";
         public int Width {get;set;}=2560;
         public int Height {get;set;}=1440;
+        public string Performance {get;set;}="quality";
         public static string Data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"L4D2MC");
         public static Settings Load() {
-            try{var s=Json.Decode<Settings>(File.ReadAllText(Path.Combine(Data,"companion.json")))??new Settings();s.Project=s.Project??"";s.Game=s.Game??"";s.Minecraft=s.Minecraft??"";s.Player=s.Player??"";s.Language=s.Language=="en"?"en":"ru";if(s.Width<320||s.Width>3840)s.Width=2560;if(s.Height<240||s.Height>2160)s.Height=1440;if(!ValidMap(s.Map))s.Map="c1m1_hotel";return s;}catch{return new Settings();}
+            try{var s=Json.Decode<Settings>(File.ReadAllText(Path.Combine(Data,"companion.json")))??new Settings();s.Project=s.Project??"";s.Game=s.Game??"";s.Minecraft=s.Minecraft??"";s.Player=s.Player??"";s.Language=s.Language=="en"?"en":"ru";if(s.Width<320||s.Width>3840)s.Width=2560;if(s.Height<240||s.Height>2160)s.Height=1440;if(!ValidMap(s.Map))s.Map="c1m1_hotel";if(s.Performance!="low"&&s.Performance!="balanced")s.Performance="quality";return s;}catch{return new Settings();}
         }
         public static bool ValidMap(string map)=>map!=null&&Regex.IsMatch(map,"^[A-Za-z0-9_]{1,64}$");
         public void Save(){Directory.CreateDirectory(Data);Json.Write(Path.Combine(Data,"companion.json"),this);}

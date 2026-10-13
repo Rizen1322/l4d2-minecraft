@@ -19,6 +19,7 @@ import time
 import re
 from combat import GameplayMailbox
 from runtime_paths import game_path
+from performance import guest_view
 from coop import CoopLink,RoomPath,RoomSource,load_config
 
 POSE_NAME = r"Local\L4D2MinecraftPose"
@@ -166,14 +167,28 @@ class PickupOutbox:
 
 class SourceSnapshot:
     """Retain a validated pose through a partial StringToFile write, never indefinitely."""
-    def __init__(self,path):self.path=path;self.sample=None;self.identity=None;self.changed=-1e30
+    def __init__(self,path):
+        self.path=path;self.sample=None;self.identity=None;self.changed=-1e30
+        self.signature=None;self.parsed_at=-1e30
     def read(self):
         now=time.monotonic()
         try:
+            info=self.path.stat()
+            if time.time()-info.st_mtime>1:return None
+            signature=(info.st_mtime_ns,info.st_size)
+            # Native camera updates still run at the fast polling cadence.
+            # Reparse Source JSON only after a write, with a bounded forced read
+            # for filesystems exposing coarse/reused metadata. Never renew the
+            # frame lease merely because its unchanged file was inspected.
+            if self.signature==signature and now-self.parsed_at<.1:
+                return self.sample if now-self.changed<1 else None
             sample=json.loads(self.path.read_text(encoding='utf-8').rstrip('\x00\r\n '))
             camera(sample,1.0)
             if not isinstance(sample['map'],str) or not re.fullmatch(r'[A-Za-z0-9_]+',sample['map']):raise ValueError('invalid map')
-            if time.time()-self.path.stat().st_mtime>1:return None
+            after=self.path.stat()
+            if time.time()-after.st_mtime>1:return None
+            self.signature=signature if signature==(after.st_mtime_ns,after.st_size) else None
+            self.parsed_at=now
             identity=(sample['map'],sample.get('epoch',0),sample['f'])
             if identity!=self.identity:self.identity=identity;self.changed=now
             self.sample=sample
@@ -687,7 +702,7 @@ async def connected_loop(args, memory, inputs, host_input, frames, render,room=N
                 await socket.send(json.dumps({'t':'clear'}))
                 # Resume the guest if its pause menu was left open; reconnects begin in play mode.
                 # Do not send Escape during world startup: it cancels Minecraft's loading screen.
-                await socket.send(json.dumps({"t": "view", "w": args.width, "h": args.height}))
+                await socket.send(json.dumps(guest_view(args.width,args.height,getattr(args,'performance','quality'))))
                 last_frame = None
                 last_collision = 0.0
                 last_ground = None
@@ -848,6 +863,7 @@ if __name__ == "__main__":
     parser.add_argument("--game", type=Path)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
+    parser.add_argument('--performance',choices=('quality','balanced','low'),default='quality')
     parser.add_argument("--events", type=Path, default=Path(__file__).parent / "events.jsonl")
     parser.add_argument('--play-cfg',default='')
     parser.add_argument('--restore-cfg',default='')

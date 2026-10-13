@@ -18,7 +18,12 @@ namespace L4D2MC.Companion {
    }
    return value;
   }
-  const string Catalog=@"Неверный файл контрольной суммы релиза.|Invalid release checksum file.
+  const string Catalog=@"Производительность Minecraft|Minecraft performance
+Качество · 100%, без лимита FPS|Quality · 100%, uncapped FPS
+Баланс · 75%, 90 FPS|Balanced · 75%, 90 FPS
+Слабый ПК · 50%, 60 FPS|Low-end PC · 50%, 60 FPS
+L4D2 сохраняет своё разрешение. Ниже режим — меньше нагрузка, мягче картинка Minecraft.|L4D2 keeps its resolution. Lower presets reduce load and soften Minecraft visuals.
+Неверный файл контрольной суммы релиза.|Invalid release checksum file.
 Обновить и установить|Update and install
 Перед обновлением закрой Minecraft и L4D2. Лаунчер можно оставить открытым.|Close Minecraft and L4D2 before updating. The launcher can stay open.
 Имя карты: только буквы, цифры и подчёркивание.|Map name: letters, numbers and underscores only.

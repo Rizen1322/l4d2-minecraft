@@ -32,10 +32,24 @@ public final class WorldBridge {
 	private static final Map<BlockPos, Boolean> changes = new LinkedHashMap<>();
 	/** While placing or removing the host's own ground: those changes aren't news to the host (server thread only). */
 	private static boolean placingGround;
+    private static long blockRevision;
+    private static final CollisionCachePolicy collisionCache=new CollisionCachePolicy();
+    private static String cachedCollision;private static int cachedCollisionCount;
+    private static final LoadedEntityIndex<Projectile> loadedProjectiles=new LoadedEntityIndex<>();
+    private static ServerLevel projectileLevel;private static boolean projectilesSeeded;
+    static void entityLoaded(Entity entity,ServerLevel level){
+        if(level.dimension()!=net.minecraft.world.level.Level.OVERWORLD || !(entity instanceof Projectile p))return;
+        if(projectileLevel!=level){loadedProjectiles.clear();projectileLevel=level;projectilesSeeded=false;}
+        loadedProjectiles.load(p.getId(),p);
+    }
+    static void entityUnloaded(Entity entity,ServerLevel level){
+        if(level==projectileLevel && entity instanceof Projectile p)loadedProjectiles.unload(p.getId(),p);
+    }
 
 	public static void serverWork(MinecraftServer s,Runnable action){ServerDispatchPolicy.run(s.isSameThread(),s::execute,action);}
 
-    public static void clearTransient(){changes.clear();barricadeDamage.clear();projectileOrigins.clear();}
+    public static void clearTransient(){changes.clear();barricadeDamage.clear();projectileOrigins.clear();collisionCache.clear();cachedCollision=null;
+        loadedProjectiles.clear();projectileLevel=null;projectilesSeeded=false;}
 
     private WorldBridge() {
 	}
@@ -206,9 +220,13 @@ public final class WorldBridge {
 	private static void reportProjectiles(final ServerLevel level) {
 		StringBuilder b = null;
         var alive = new java.util.HashSet<Integer>();
-		for (Entity e : level.getAllEntities()) {
+        // Seed once for entities loaded before bridge attachment; subsequent
+        // load/unload events maintain membership without scanning the world.
+        if(projectileLevel!=level){loadedProjectiles.clear();projectileLevel=level;projectilesSeeded=false;}
+        if(!projectilesSeeded){for(Entity entity:level.getAllEntities())entityLoaded(entity,level);projectilesSeeded=true;}
+		for (Entity e : loadedProjectiles.values()) {
 			String kind = null;
-			if (!(e instanceof Projectile projectile) || !(projectile.getOwner() instanceof Player)) {
+			if (e.isRemoved() || !(e instanceof Projectile projectile) || !(projectile.getOwner() instanceof Player)) {
 				continue;
 			}
 
@@ -284,6 +302,7 @@ public final class WorldBridge {
 
 	/** Server thread, from Level.setBlock: remember the change; flushed once per tick. */
 	public static void onBlockChanged(final ServerLevel level, final BlockPos pos, final BlockState state) {
+        blockRevision++;
 		if (!Passthrough.active || !MapBuilds.ready || level != level.getServer().overworld()) {
 			return;
 		}
@@ -350,21 +369,54 @@ public final class WorldBridge {
             // Never truncate it silently: an omitted solid would lose its collision.
             StringBuilder cells=new StringBuilder();
             int found=0;
+            boolean cacheable=true;
             int x0=Math.max(-1023,c.getX()-radius),x1=Math.min(1023,c.getX()+radius);
             int z0=Math.max(-1023,c.getZ()-radius),z1=Math.min(1023,c.getZ()+radius);
             int y0=Math.max(-1023,c.getY()-24),y1=Math.min(1023,c.getY()+40);
-            for(int x=x0;x<=x1;x++) for(int z=z0;z<=z1;z++) for(int y=y0;y<=y1;y++) {
-                p.set(x,y,z);
-                // Loaded chunks only; do not interpret an unavailable chunk as AIR.
-                if(!level.isInWorldBounds(p))continue;
+            int scanY0=Math.max(y0,level.getMinY()),scanY1=Math.min(y1,level.getMaxY());
+            String bounds=x0+","+y0+","+z0+","+x1+","+y1+","+z1;
+            // Availability is a chunk property, not a per-cell property. Also
+            // validate it on cache hits: unloaded chunks must never become AIR.
+            if(scanY0<=scanY1)for(int cx=x0>>4;cx<=x1>>4;cx++)for(int cz=z0>>4;cz<=z1>>4;cz++) {
+                p.set(cx*16,scanY0,cz*16);
+                if(!level.isLoaded(p)){collisionCache.clear();return;}
+            }
+            long scanRevision=blockRevision,now=System.nanoTime();
+            if(cachedCollision!=null && collisionCache.reusable(level,scene,scanRevision,bounds,now)) {
+                flush(s);Passthrough.events.accept(cachedCollision);
+                Passthrough.events.accept("{\"t\":\"syncdone\",\"scene\":"+scene+",\"id\":"+request+",\"count\":"+cachedCollisionCount+"}");
+                return;
+            }
+            for(int x=x0;x<=x1;x++) for(int z=z0;z<=z1;z++) {
+                if(scanY0>scanY1)continue;
+                p.set(x,scanY0,z);
+                // Check availability once per column, without generating chunks.
+                // Missing data still aborts the entire replacement snapshot.
                 if(!level.isLoaded(p))return;
-                if(solidForHost(level,p,level.getBlockState(p))) {
-                    if(++found>10000)return;
-                    cells.append(cells.isEmpty()?"":",").append(x).append(',').append(y).append(',').append(z);
+                var chunk=level.getChunkAt(p);
+                for(int y=scanY0;y<=scanY1;) {
+                    var section=chunk.getSections()[chunk.getSectionIndex(y)];
+                    int end=Math.min(scanY1,y|15);
+                    // The section's maintained air count is exact, including edits.
+                    if(section.hasOnlyAir()){y=end+1;continue;}
+                    for(;y<=end;y++) {
+                        p.set(x,y,z);
+                        var state=section.getBlockState(x&15,y&15,z&15);
+                        // Animated/dynamic collision can change without a block
+                        // state write (e.g. moving pistons or block entities).
+                        if(state.hasBlockEntity() || state.getBlock().hasDynamicShape())cacheable=false;
+                        if(solidForHost(level,p,state)) {
+                            if(++found>10000)return;
+                            cells.append(cells.isEmpty()?"":",").append(x).append(',').append(y).append(',').append(z);
+                        }
+                    }
                 }
             }
             flush(s);
-            Passthrough.events.accept("{\"t\":\"blocks\",\"scene\":"+scene+",\"bounds\":["+x0+","+y0+","+z0+","+x1+","+y1+","+z1+"],\"set\":["+cells+"]}");
+            String complete="{\"t\":\"blocks\",\"scene\":"+scene+",\"bounds\":["+bounds+"],\"set\":["+cells+"]}";
+            if(cacheable){cachedCollision=complete;cachedCollisionCount=found;collisionCache.store(level,scene,scanRevision,bounds,now);}
+            else{collisionCache.clear();cachedCollision=null;}
+            Passthrough.events.accept(complete);
 
 			Passthrough.events.accept("{\"t\":\"syncdone\",\"scene\":"+scene+",\"id\":" + request + ",\"count\":" + found + "}");
 		});

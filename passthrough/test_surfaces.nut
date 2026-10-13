@@ -10,7 +10,8 @@ class Vec {
     function Length(){return sqrt(x*x+y*y+z*z);}
 }
 function Vector(x,y,z){return Vec(x,y,z);}
-function TraceLine(t){t.hit<-t.start.z>t.end.z;t.startsolid<-false;t.pos<-Vec(t.start.x,t.start.y,0);}
+local traceReads=0;
+function TraceLine(t){traceReads++;t.hit<-t.start.z>t.end.z;t.startsolid<-false;t.pos<-Vec(t.start.x,t.start.y,0);}
 ::L4D2MCPreviousGameplay<-null;::L4D2MCBridge<-{};
 dofile("passthrough/host/l4d2mc_gameplay.nut");
 dofile("passthrough/host/l4d2mc_survival.nut");
@@ -22,6 +23,7 @@ if(b.CompleteMailbox(["3 map 7","1 2 3","end 3 2"],"3"))throw "Wrong row count a
 if(b.CompleteMailbox(["3 map 7","1 2 3","end 2 1"],"3"))throw "Old footer accepted";
 
 if(!b.WalkableFloor({hit=true,pos=Vec(0,0,0)},null))throw "Retail trace without normal rejected";
+local cornerReads=0;
 class Area {
     id=0;east=null;constructor(i){id=i;}
     function GetID(){return id;}
@@ -29,10 +31,15 @@ class Area {
     function GetAdjacentArea(dir,n){return east;}
     function IsBlocked(team,ignoreBlockers){return false;}
     function IsDamaging(){return false;}
-    function GetCorner(i){return Vec((id-1)*128+(i==2?128:0),i==2?128:0,0);}
+    function GetCorner(i){cornerReads++;return Vec((id-1)*128+(i==2?128:0),i==2?128:0,0);}
     function GetZ(pos){return 0.0;}
 }
 local a=Area(1),c=Area(2);a.east=c;
+if(b.NavPortal(a,c,1,28,88)==null)throw "Valid portal rejected";
+local readBefore=cornerReads,traceBefore=traceReads;
+if(b.NavPortal(a,c,1,28,88)==null)throw "Cached portal rejected";
+if(cornerReads!=readBefore || readBefore!=4)throw "Static nav bounds fetched repeatedly";
+if(traceReads<=traceBefore)throw "Dynamic portal traces were incorrectly cached";
 ::NavMesh<-{GetNavArea=function(pos,beneath){return pos.x<128?a:c;}};
 local answer=null;b.Reply=function(v){answer=v;return true;};
 local player={GetOrigin=function(){return Vec(0,0,0);}};

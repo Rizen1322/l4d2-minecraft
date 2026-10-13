@@ -16,7 +16,7 @@ sampler sDepth { Texture = MCDepthTex; MinFilter = POINT; MagFilter = POINT; Add
 sampler sOverlay { Texture = MCOverlayTex; AddressU = CLAMP; AddressV = CLAMP; };
 sampler sGui { Texture = MCGuiTex; AddressU = CLAMP; AddressV = CLAMP; };
 
-// x = near, y = far, z = flags (1: [0,1] depth, 2: rows bottom-up, 4: reversed Z). Set by the add-on.
+// x = near, y = far, z = flags (1: [0,1], 2: bottom-up, 4: reversed Z, 8: low-cost cosmetics).
 uniform float3 McPlanes = float3(0.05, 2048.0, 7.0);
 // L4D2's camera near/far clip. Set by the add-on.
 uniform float2 HostPlanes = float2(7.0, 30000.0);
@@ -247,7 +247,6 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 		// camera Minecraft rendered with (rotation + how far the camera moved since). The first point that is
 		// behind Minecraft's surface there is where Minecraft is seen: refine it and sample. Thin, close things
 		// (Steve in third person) are found even when the camera has swung sideways.
-		const float3 ray = float3((uv.x * 2.0 - 1.0) * WarpTan.x * BUFFER_WIDTH * BUFFER_RCP_HEIGHT, (1.0 - uv.y * 2.0) * WarpTan.x, -1.0);
 		const float2 mcScale = float2(WarpTan.y * WarpTan.z, WarpTan.y);
 		const float zNear = 0.2;
 		float2 ndc = 0.0;
@@ -262,12 +261,16 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
         // nearer depths first; the tracked hit is the stable fallback, not an
         // excuse to bypass guest-versus-guest visibility ordering.
         const float zFar=max(min(min(zh+allow,400.0),tracked?trackedDepth:400.0),0.5);
+        // Same logarithmic 24-sample schedule, one exponentiation per pixel
+        // instead of per step. Pin the last sample to the original far bound.
+        const float marchScale=pow(zFar/zNear,1.0/23.0);
+        float marchZ=zNear;
         inside=false;
 		[loop] for (int i = 0; i < 24 && !inside; ++i)
 		{
-			const float z = zNear * pow(zFar / zNear, i / 23.0);
-			const float3 p = ray * z;
-			const float3 pm = float3(dot(WarpRow0, p), dot(WarpRow1, p), dot(WarpRow2, p)) + WarpT;
+			const float z = i==23?zFar:marchZ;
+            marchZ*=marchScale;
+			const float3 pm = rotatedRay*z + WarpT;
 			if (pm.z > -1e-3)
 				continue;
 			const float2 n = pm.xy / -pm.z / mcScale;
@@ -281,8 +284,7 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 			ndc = n;
 			[loop] for (int k = 0; k < 12; ++k)
 			{
-				const float3 pk = ray * zg;
-				const float3 mk = float3(dot(WarpRow0, pk), dot(WarpRow1, pk), dot(WarpRow2, pk)) + WarpT;
+				const float3 mk = rotatedRay*zg + WarpT;
 				if (mk.z > -1e-3)
 					break;
 				const float2 nk = mk.xy / -mk.z / mcScale;
@@ -292,7 +294,6 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 				if (zk > 1e8)
 					break;
 				ndc = nk;
-				const float3 q = float3(nk * mcScale, -1.0) * zk - WarpT;
 				// Solve the sampled depth along the HOST ray directly. Back-projecting
                 // an off-ray sample first couples x/y error into depth and can
                 // oscillate between foreground/background surfaces.
@@ -344,6 +345,13 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 
 	const float visible = zm < zh + allow ? 1.0 : 0.0;
 	const float cover = world.a * visible;
+	// Empty or fully occluded guest pixels need no lighting/grade/haze fetches.
+	// Keep host depth for contact shadows in the final pass.
+	if (cover <= 0.0) {
+		outColor = float4(host, 1.0);
+		outInfo = float4(0.0, 0.0, zh, 0.0);
+		return;
+	}
 	outColor = float4(relight(world.rgb, uv, zm) * visible + host * (1.0 - cover), 1.0);
 	outInfo = float4(cover, cover > 0.0 ? zm : 0.0, zh, 0.0);
 }
@@ -351,7 +359,9 @@ void PS_Composite(float4 pos : SV_Position, float2 uv : TEXCOORD, out float4 out
 /// Minecraft's bright parts (lava, fire, the portal, blazes): what glows.
 float4 PS_Bright(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 {
+    if (McPlanes.z >= 8.0) return 0.0;
 	const float cover = tex2D(sMcInfo, uv).x;
+	if (cover <= 0.0 || BloomStrength <= 0.0) return 0.0;
 	const float3 c = tex2D(sComposite, uv).rgb;
 	const float l = luma(c);
 	return float4(c * (cover * saturate((l - BloomThreshold) / max(1.0 - BloomThreshold, 1e-3)) / max(l, 1e-3)), 1.0);
@@ -387,7 +397,7 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 	float3 color = tex2D(sComposite, wuv).rgb;
 	const float4 info = tex2D(sMcInfo, wuv);
 	// soften where Minecraft meets L4D2 (L4D2's anti-aliasing never saw Minecraft)
-	if (EdgeSoftness > 0.0)
+	if (EdgeSoftness > 0.0 && McPlanes.z < 8.0)
 	{
 		const float c1 = tex2D(sMcInfo, wuv + float2(px.x, 0)).x, c2 = tex2D(sMcInfo, wuv - float2(px.x, 0)).x;
 		const float c3 = tex2D(sMcInfo, wuv + float2(0, px.y)).x, c4 = tex2D(sMcInfo, wuv - float2(0, px.y)).x;
@@ -400,7 +410,7 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 		}
 	}
 	// contact shadows: L4D2 surface pixels with Minecraft surfaces close by (in depth), mostly above them
-	if (ContactShadow > 0.0 && info.x < 0.5 && info.z < 200.0)
+	if (ContactShadow > 0.0 && McPlanes.z < 8.0 && info.x < 0.5 && info.z < 200.0)
 	{
 		const float zh = info.z;
 		const float r = clamp(ContactRadius / max(zh, 0.5) * BUFFER_HEIGHT / (2.0 * WarpTan.x), 2.0, 48.0);
@@ -419,7 +429,7 @@ float3 PS_Final(float4 pos : SV_Position, float2 uv : TEXCOORD) : SV_Target
 		color *= 1.0 - ContactShadow * saturate(occ / max(weight, 1e-3) * 2.2);
 	}
 	// Minecraft's glow
-	if (BloomStrength > 0.0)
+	if (BloomStrength > 0.0 && McPlanes.z < 8.0)
 	{
 		const float3 b = tex2Dlod(sMcBright, float4(wuv, 0, 1.0)).rgb * 0.5 + tex2Dlod(sMcBright, float4(wuv, 0, 2.5)).rgb * 0.8
 			+ tex2Dlod(sMcBright, float4(wuv, 0, 4.0)).rgb;

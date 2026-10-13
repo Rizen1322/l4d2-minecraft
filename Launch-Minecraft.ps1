@@ -1,4 +1,4 @@
-param([string]$Game = '', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless)
+param([string]$Game = '', [ValidatePattern('^[a-zA-Z0-9_]+$')][string]$Map = 'c1m1_hotel', [ValidateRange(320,3840)][int]$Width = 1280, [ValidateRange(240,2160)][int]$Height = 720, [switch]$Borderless, [ValidateSet("quality","balanced","low")][string]$Performance = "quality")
 $ErrorActionPreference = 'Stop'
 # Optional local room settings; credentials stay in this file, never command arguments.
 $coopPath = Join-Path $PSScriptRoot 'l4d2mc.coop.json'
@@ -139,7 +139,7 @@ try {
     $bridgeScript = Join-Path $taskRoot 'passthrough\bridge.py'
     $windowFlags = '-windowed -w ' + $Width + ' -h ' + $Height
     if($Borderless){$windowFlags += ' -noborder'}
-    $bridgeArguments = @('-u', ('"' + $bridgeScript + '"'), '--game', ('"' + $Game + '"'), '--play-cfg', $playCfgName, '--restore-cfg', $restoreCfgName, '--width', ([string]$Width), '--height', ([string]$Height))
+    $bridgeArguments = @('-u', ('"' + $bridgeScript + '"'), '--game', ('"' + $Game + '"'), '--play-cfg', $playCfgName, '--restore-cfg', $restoreCfgName, '--width', ([string]$Width), '--height', ([string]$Height), '--performance', $Performance)
     if (Test-Path -LiteralPath $coopPath) { $bridgeArguments += @('--coop-config', ('"' + $coopPath + '"')) }
     $bridgeProcess = Start-Process -FilePath $pythonExe -ArgumentList $bridgeArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $evidence 'bridge-runtime.log') -RedirectStandardError (Join-Path $evidence 'bridge-errors.log')
     # Solo: a LAN-only local server never validates Steam tickets, so a flaky Steam

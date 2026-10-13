@@ -103,6 +103,13 @@ tasks.register('verifyFramePublishPolicy', JavaExec) {
 }
 check.dependsOn verifyFramePublishPolicy
 
+tasks.register('verifyPerformancePolicy', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.rehan.passthrough.PerformancePolicyTest'
+}
+check.dependsOn verifyPerformancePolicy
+
 tasks.register('verifyAvatarPosePolicy', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath

@@ -33,6 +33,9 @@ public class Passthrough implements ModInitializer {
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register((level,chunk,newChunk) -> {WorldBridge.cleanLegacySupports(level,chunk);MapBuilds.chunk(level,chunk);});
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_UNLOAD.register(MapBuilds::unload);
         ServerEntityEvents.ENTITY_LOAD.register(MobWar::onEntityLoad);
+        ServerEntityEvents.ENTITY_UNLOAD.register(MobWar::onEntityUnload);
+        ServerEntityEvents.ENTITY_LOAD.register(WorldBridge::entityLoaded);
+        ServerEntityEvents.ENTITY_UNLOAD.register(WorldBridge::entityUnloaded);
 		ServerTickEvents.END_SERVER_TICK.register(WorldBridge::tick);
 		LOG.info("passthrough loaded");
 	}

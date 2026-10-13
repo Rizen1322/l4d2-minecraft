@@ -14,6 +14,7 @@ try {
     $restoreCfgName = 'restore_probe'
     $Width = 2560
     $Height = 1440
+    $Performance = "low"
     $lines = Get-Content -LiteralPath (Join-Path $taskRoot 'Launch-Minecraft.ps1')
     # Exercise the real launcher's argument expressions through Start-Process.
     $assignment = @($lines | Where-Object { $_ -match '^\s*\$bridgeArguments = ' })
@@ -25,7 +26,7 @@ try {
     $process = Start-Process -FilePath $pythonExe -ArgumentList $bridgeArguments -WorkingDirectory $taskRoot -WindowStyle Hidden -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     if ($process.ExitCode -ne 0) { throw ([IO.File]::ReadAllText($stderr)) }
     $actual = Get-Content -LiteralPath $stdout -Raw | ConvertFrom-Json
-    $expected = @('--game', $Game, '--play-cfg', $playCfgName, '--restore-cfg', $restoreCfgName, '--width', '2560', '--height', '1440', '--coop-config', $coopPath)
+    $expected = @('--game', $Game, '--play-cfg', $playCfgName, '--restore-cfg', $restoreCfgName, '--width', '2560', '--height', '1440', '--performance', 'low', '--coop-config', $coopPath)
     if ($actual.Count -ne $expected.Count) { throw ('Wrong argument count: ' + $actual.Count) }
     for ($i = 0; $i -lt $expected.Count; $i++) {
         if ($actual[$i] -cne $expected[$i]) { throw ('Wrong argument at index ' + $i) }
